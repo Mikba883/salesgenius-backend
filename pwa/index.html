@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f172a">
+  
+  <!-- PWA Meta Tags -->
+  <meta name="description" content="AI Sales Assistant - Suggerimenti in tempo reale durante le tue chiamate">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SalesGenius">
+  
+  <title>SalesGenius AI Assistant</title>
+  
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest.json">
+  
+  <!-- Icons -->
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #e2e8f0;
+      overflow-x: hidden;
+      padding: 0;
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Minimal Draggable Header */
+    #app-header {
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      cursor: move;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+
+    #app-header .title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #60a5fa;
+    }
+
+    #app-header .controls {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .control-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #e2e8f0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      font-size: 16px;
+    }
+
+    .control-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .control-btn.minimize:hover {
+      background: rgba(251, 191, 36, 0.2);
+      color: #fbbf24;
+    }
+
+    .control-btn.close:hover {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+    }
+
+    /* Main Content */
+    #app-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Status Bar */
+    .status-bar {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(96, 165, 250, 0.3);
+      border-radius: 12px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(10px);
+    }
+
+    .status-bar.disconnected {
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .status-bar.connected {
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+
+    .status-dot.connected {
+      background: #22c55e;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .status-info {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    /* Start/Stop Button */
+    .action-button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .action-button.start {
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: white;
+    }
+
+    .action-button.start:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);
+    }
+
+    .action-button.stop {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      color: white;
+    }
+
+    .action-button.stop:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);
+    }
+
+    .action-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    /* Suggestions Container */
+    .suggestions-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+      min-height: 200px;
+    }
+
+    .suggestion-card {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 12px 14px;
+      animation: slideIn 0.3s ease-out;
+      backdrop-filter: blur(10px);
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .suggestion-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .suggestion-category {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #60a5fa;
+    }
+
+    .suggestion-category .icon {
+      font-size: 16px;
+    }
+
+    .suggestion-status {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+
+    .suggestion-status.live {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+      animation: pulse 2s infinite;
+    }
+
+    .suggestion-status.done {
+      background: rgba(100, 116, 139, 0.2);
+      color: #94a3b8;
+    }
+
+    .suggestion-text {
+      color: #e2e8f0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #64748b;
+    }
+
+    .empty-state .icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* Instructions */
+    .instructions {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 12px;
+      color: #93c5fd;
+      line-height: 1.6;
+    }
+
+    .instructions strong {
+      color: #60a5fa;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(96, 165, 250, 0.3);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(96, 165, 250, 0.5);
+    }
+
+    /* Resize handle */
+    .resize-handle {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 20px;
+      height: 20px;
+      cursor: nwse-resize;
+      opacity: 0.3;
+    }
+
+    .resize-handle::after {
+      content: '⋰';
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      font-size: 16px;
+      color: #60a5fa;
+    }
+  </style>
+</head>
+<body>
+  <!-- Minimal Header -->
+  <div id="app-header">
+    <div class="title">
+      <span>🎯</span>
+      <span>SalesGenius AI</span>
+    </div>
+    <div class="controls">
+      <button class="control-btn minimize" onclick="minimizeApp()" title="Minimizza">−</button>
+      <button class="control-btn close" onclick="closeApp()" title="Chiudi">×</button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div id="app-content">
+    <!-- Status Bar -->
+    <div class="status-bar" id="statusBar">
+      <div class="status-indicator">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Disconnesso</span>
+      </div>
+      <div class="status-info">
+        <span id="timerDisplay">00:00</span>
+        <span id="suggestionCount">0 tips</span>
+      </div>
+    </div>
+
+    <!-- Action Button -->
+    <button class="action-button start" id="actionButton" onclick="toggleSharing()">
+      <span>🎤</span>
+      <span>Avvia Assistente</span>
+    </button>
+
+    <!-- Instructions -->
+    <div class="instructions" id="instructions">
+      <strong>💡 Come usare:</strong><br>
+      1. Apri la tua chiamata (Meet/Zoom) in un'altra finestra<br>
+      2. Clicca "Avvia Assistente"<br>
+      3. Seleziona la finestra della chiamata e spunta "Condividi audio"<br>
+      4. Posiziona questa finestra sopra la chiamata per vedere i suggerimenti!
+    </div>
+
+    <!-- Suggestions Container -->
+    <div class="suggestions-container" id="suggestionsContainer">
+      <div class="empty-state">
+        <div class="icon">💬</div>
+        <p>I suggerimenti AI appariranno qui in tempo reale<br>durante la tua chiamata</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Configuration
+    const WS_URL = import.meta.env?.VITE_WS_URL || 'ws://localhost:8080';
+    
+    // Category metadata
+    const CATEGORY_META = {
+      conversational: { icon: "🎧", label: "Conversational" },
+      value: { icon: "💎", label: "Value & Objection" },
+      closing: { icon: "✅", label: "Closing" },
+      market: { icon: "🌐", label: "Market Intel" },
+    };
+
+    // State
+    let isSharing = false;
+    let ws = null;
+    let audioContext = null;
+    let mediaStream = null;
+    let workletNode = null;
+    let seq = 0;
+    let suggestions = [];
+    let timer = 0;
+    let timerInterval = null;
+
+    // DOM elements
+    const statusBar = document.getElementById('statusBar');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const actionButton = document.getElementById('actionButton');
+    const suggestionsContainer = document.getElementById('suggestionsContainer');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const suggestionCount = document.getElementById('suggestionCount');
+    const instructions = document.getElementById('instructions');
+
+    // Start/Stop sharing
+    async function toggleSharing() {
+      if (!isSharing) {
+        await startSharing();
+      } else {
+        stopSharing();
+      }
+    }
+
+    async function startSharing() {
+      try {
+        // Request screen + audio
+        mediaStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+        });
+
+        const audioTrack = mediaStream.getAudioTracks()[0];
+        if (!audioTrack) {
+          throw new Error('Nessun audio condiviso. Spunta "Condividi audio" nel prompt!');
+        }
+
+        // Setup audio context
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        
+        // Create audio worklet
+        const workletCode = `
+          class PCMWorklet extends AudioWorkletProcessor {
+            process(inputs) {
+              const input = inputs[0];
+              if (!input || !input[0]) return true;
+              const ch0 = input[0];
+              const pcm = new Int16Array(ch0.length);
+              for (let i = 0; i < ch0.length; i++) {
+                let s = Math.max(-1, Math.min(1, ch0[i]));
+                pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              }
+              this.port.postMessage(pcm);
+              return true;
+            }
+          }
+          registerProcessor('pcm-worklet', PCMWorklet);
+        `;
+        
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const workletUrl = URL.createObjectURL(blob);
+        await audioContext.audioWorklet.addModule(workletUrl);
+        URL.revokeObjectURL(workletUrl);
+
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        const gain = audioContext.createGain();
+        gain.gain.value = 1.0;
+        source.connect(gain);
+
+        workletNode = new AudioWorkletNode(audioContext, 'pcm-worklet', {
+          numberOfInputs: 1,
+          numberOfOutputs: 0,
+          channelCount: 1,
+        });
+        gain.connect(workletNode);
+
+        // Connect WebSocket
+        updateStatus('connecting', 'Connessione...');
+        ws = new WebSocket(WS_URL);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = () => {
+          updateStatus('connected', 'Connesso');
+          ws.send(JSON.stringify({
+            op: 'hello',
+            app: 'salesgenius-pwa',
+            version: '1.0',
+          }));
+
+          // TODO: Send JWT if authenticated
+        };
+
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            handleWSMessage(msg);
+          } catch (e) {
+            console.error('Error parsing message:', e);
+          }
+        };
+
+        ws.onerror = (e) => {
+          console.error('WebSocket error:', e);
+          updateStatus('disconnected', 'Errore connessione');
+        };
+
+        ws.onclose = () => {
+          updateStatus('disconnected', 'Disconnesso');
+          stopSharing();
+        };
+
+        // Stream audio
+        workletNode.port.onmessage = (e) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          const pcm = e.data;
+          ws.send(JSON.stringify({ op: 'audio', seq: seq++, sr: 16000, ch: 1 }));
+          ws.send(pcm.buffer);
+        };
+
+        // Auto-stop when user stops sharing
+        mediaStream.getVideoTracks()[0].addEventListener('ended', stopSharing);
+
+        // Update UI
+        isSharing = true;
+        actionButton.classList.remove('start');
+        actionButton.classList.add('stop');
+        actionButton.innerHTML = '<span>⏹</span><span>Ferma Assistente</span>';
+        instructions.style.display = 'none';
+        
+        // Start timer
+        startTimer();
+
+      } catch (error) {
+        console.error('Error starting:', error);
+        alert(error.message);
+        updateStatus('disconnected', 'Errore');
+      }
+    }
+
+    function stopSharing() {
+      try {
+        workletNode?.disconnect();
+        audioContext?.close();
+        mediaStream?.getTracks().forEach(t => t.stop());
+        ws?.close();
+      } finally {
+        workletNode = null;
+        audioContext = null;
+        mediaStream = null;
+        ws = null;
+        seq = 0;
+        isSharing = false;
+
+        actionButton.classList.remove('stop');
+        actionButton.classList.add('start');
+        actionButton.innerHTML = '<span>🎤</span><span>Avvia Assistente</span>';
+        updateStatus('disconnected', 'Disconnesso');
+        instructions.style.display = 'block';
+        
+        stopTimer();
+      }
+    }
+
+    function handleWSMessage(msg) {
+      if (msg.type === 'suggestion.start') {
+        addSuggestion(msg.id, msg.category);
+      } else if (msg.type === 'suggestion.delta') {
+        updateSuggestion(msg.id, msg.textChunk);
+      } else if (msg.type === 'suggestion.end') {
+        finalizeSuggestion(msg.id);
+      }
+    }
+
+    function addSuggestion(id, category) {
+      const meta = CATEGORY_META[category] || { icon: "💡", label: "Smart Tip" };
+      
+      suggestions.unshift({ id, category, text: '', status: 'live' });
+      updateSuggestionCount();
+      renderSuggestions();
+    }
+
+    function updateSuggestion(id, chunk) {
+      const suggestion = suggestions.find(s => s.id === id);
+      if (suggestion) {
+        suggestion.text += chunk;
+        renderSuggestions();
+      }
+    }
+
+    function finalizeSuggestion(id) {
+      const suggestion = suggestions.find(s => s.id === id);
+      if (suggestion) {
+        suggestion.status = 'done';
+        renderSuggestions();
+      }
+    }
+
+    function renderSuggestions() {
+      if (suggestions.length === 0) {
+        suggestionsContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">💬</div>
+            <p>I suggerimenti AI appariranno qui in tempo reale<br>durante la tua chiamata</p>
+          </div>
+        `;
+        return;
+      }
+
+      suggestionsContainer.innerHTML = suggestions.map(s => {
+        const meta = CATEGORY_META[s.category] || { icon: "💡", label: "Smart Tip" };
+        return `
+          <div class="suggestion-card">
+            <div class="suggestion-header">
+              <div class="suggestion-category">
+                <span class="icon">${meta.icon}</span>
+                <span>${meta.label}</span>
+              </div>
+              <span class="suggestion-status ${s.status}">${s.status === 'live' ? 'live' : 'done'}</span>
+            </div>
+            <div class="suggestion-text">${s.text || '<em>Generazione...</em>'}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function updateStatus(state, text) {
+      statusBar.className = `status-bar ${state}`;
+      statusDot.className = `status-dot ${state}`;
+      statusText.textContent = text;
+    }
+
+    function startTimer() {
+      timer = 0;
+      timerInterval = setInterval(() => {
+        timer++;
+        const minutes = Math.floor(timer / 60).toString().padStart(2, '0');
+        const seconds = (timer % 60).toString().padStart(2, '0');
+        timerDisplay.textContent = `${minutes}:${seconds}`;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      timer = 0;
+      timerDisplay.textContent = '00:00';
+    }
+
+    function updateSuggestionCount() {
+      suggestionCount.textContent = `${suggestions.length} tips`;
+    }
+
+    // Make functions global
+    window.toggleSharing = toggleSharing;
+    window.minimizeApp = () => window.blur();
+    window.closeApp = () => window.close();
+
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(() => {
+        console.log('Service Worker registered');
+      });
+    }
+  </script>
+</body>
+</html>

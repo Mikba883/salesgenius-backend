@@ -1,0 +1,33 @@
+{
+  "name": "salesgenius-backend",
+  "version": "1.0.0",
+  "description": "SalesGenius real-time AI sales assistant backend",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": ["websocket", "deepgram", "openai", "sales", "ai"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@deepgram/sdk": "^3.4.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "openai": "^4.28.0",
+    "ws": "^8.16.0",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "@types/ws": "^8.5.10",
+    "@types/uuid": "^9.0.7",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
