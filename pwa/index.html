@@ -233,25 +233,33 @@
         </div>
 
         <div class="instruction">
-            <div class="instruction-title">📺 Come funziona:</div>
+            <div class="instruction-title">🚀 Quick Start:</div>
             <div class="instruction-text">
-                1. Apri la tua chiamata (Google Meet, Zoom web, Teams) in un'altra tab<br>
-                2. Clicca "🚀 Launch Teleprompter"<br>
-                3. Si aprirà una finestra flottante sempre visibile<br>
-                4. Seleziona la tab della chiamata e ✅ spunta "Condividi audio"<br>
-                5. I suggerimenti AI appariranno in tempo reale nel teleprompter!
+                <strong>Option 1 - Bookmark (Recommended):</strong><br>
+                Click the button below to open the Teleprompter, then <strong>bookmark it</strong> (Ctrl+D / Cmd+D) for easy access!<br><br>
+                <strong>Option 2 - Desktop Shortcut:</strong><br>
+                Open the Teleprompter → More Tools → Create Shortcut → ✅ "Open as window"
             </div>
         </div>
 
         <div class="btn-group">
-            <button id="launchBtn" disabled>
-                <span>🚀</span>
-                <span>Launch Teleprompter</span>
+            <button id="openTeleprompterBtn">
+                <span>📺</span>
+                <span>Open Teleprompter Window</span>
             </button>
-            <button id="stopBtn" disabled>
-                <span>⏹️</span>
-                <span>Stop Session</span>
-            </button>
+            <a href="pip-window.html" target="_blank" style="text-decoration: none;">
+                <button style="background: #8b5cf6; width: 100%;">
+                    <span>🔗</span>
+                    <span>Open in New Tab (for Bookmarking)</span>
+                </button>
+            </a>
+        </div>
+
+        <div class="instruction" style="margin-top: 20px; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-color: #3b82f6;">
+            <div class="instruction-title" style="color: #1e40af;">💡 Pro Tip:</div>
+            <div class="instruction-text" style="color: #1e40af;">
+                For best experience: Bookmark the Teleprompter window and keep it open on a second monitor or corner of your screen during calls!
+            </div>
         </div>
 
         <div class="feature-list">
@@ -279,15 +287,9 @@
     </div>
 
     <script>
-        const WS_URL = 'wss://salesgenius-backend.onrender.com';
-        const launchBtn = document.getElementById('launchBtn');
-        const stopBtn = document.getElementById('stopBtn');
+        const openTeleprompterBtn = document.getElementById('openTeleprompterBtn');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
-
-        let pipWindow = null;
-        let ws = null;
-        let isActive = false;
 
         // Check backend health
         fetch('https://salesgenius-backend.onrender.com/health')
@@ -295,108 +297,31 @@
             .then(data => {
                 console.log('✅ Backend online:', data);
                 statusDot.classList.add('connected');
-                statusText.textContent = '🟢 Backend ready';
-                launchBtn.disabled = false;
+                statusText.textContent = '🟢 Backend ready - Click to open Teleprompter!';
             })
             .catch(err => {
                 console.error('❌ Backend offline:', err);
-                statusText.textContent = '🔴 Backend offline';
+                statusText.textContent = '🔴 Backend offline - Please try again later';
             });
 
-        // Launch PiP window
-        launchBtn.addEventListener('click', () => {
-            console.log('🚀 Launching Picture-in-Picture...');
-            
-            // Open PiP window
-            const width = 400;
-            const height = 600;
+        // Open PiP window
+        openTeleprompterBtn.addEventListener('click', () => {
+            const width = 420;
+            const height = 700;
             const left = window.screen.width - width - 20;
             const top = 20;
             
-            pipWindow = window.open(
+            const teleprompter = window.open(
                 'pip-window.html',
-                'SalesGenius Teleprompter',
-                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,status=no,toolbar=no,menubar=no,location=no`
+                'SalesGenius',
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`
             );
 
-            if (!pipWindow) {
-                alert('⚠️ Popup bloccato! Abilita i popup per questo sito.');
-                return;
+            if (!teleprompter) {
+                alert('⚠️ Popup blocked! Please allow popups for this site.');
+            } else {
+                statusText.textContent = '✅ Teleprompter opened! Bookmark it for easy access.';
             }
-
-            // Wait for PiP window to load, then connect WebSocket
-            pipWindow.addEventListener('load', () => {
-                console.log('✅ PiP window loaded');
-                connectWebSocket();
-            });
-
-            launchBtn.disabled = true;
-            stopBtn.disabled = false;
-            isActive = true;
-            statusText.textContent = '🎙️ Teleprompter active';
-        });
-
-        // Stop session
-        stopBtn.addEventListener('click', () => {
-            console.log('⏹️ Stopping session...');
-            
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
-            
-            if (pipWindow) {
-                pipWindow.close();
-                pipWindow = null;
-            }
-
-            launchBtn.disabled = false;
-            stopBtn.disabled = true;
-            isActive = false;
-            statusText.textContent = '🟢 Backend ready';
-        });
-
-        // Connect WebSocket
-        function connectWebSocket() {
-            console.log('🔌 Connecting to backend...');
-            ws = new WebSocket(WS_URL);
-
-            ws.onopen = () => {
-                console.log('✅ WebSocket connected');
-                statusText.textContent = '🟢 Connected - Ready for audio';
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    console.log('📨 Message:', data);
-
-                    // Forward to PiP window
-                    if (pipWindow && !pipWindow.closed) {
-                        pipWindow.postMessage(data, '*');
-                    }
-                } catch (err) {
-                    console.error('❌ Error parsing message:', err);
-                }
-            };
-
-            ws.onerror = (error) => {
-                console.error('❌ WebSocket error:', error);
-                statusText.textContent = '🔴 Connection error';
-            };
-
-            ws.onclose = () => {
-                console.log('🔌 WebSocket closed');
-                if (isActive) {
-                    statusText.textContent = '🔴 Disconnected';
-                }
-            };
-        }
-
-        // Handle window close
-        window.addEventListener('beforeunload', () => {
-            if (ws) ws.close();
-            if (pipWindow) pipWindow.close();
         });
     </script>
 </body>
