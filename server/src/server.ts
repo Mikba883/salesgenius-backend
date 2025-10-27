@@ -81,33 +81,40 @@ const CATEGORIES = {
 // ==========================================
 // PROMPT AI
 // ==========================================
-const SYSTEM_PROMPT = `You are an expert B2B sales AI assistant.
-Analyze the conversation and provide brief, concrete, and actionable suggestions in real-time.
+const SYSTEM_PROMPT = `You are an expert B2B sales AI assistant providing real-time suggestions during sales calls.
 
-CRITICAL RULES:
-- Suggestions MAX 20 words
-- Actionable and specific
-- NO invented data (prices, metrics, specific ROI)
-- Suggest strategic QUESTIONS or FRAMEWORKS
-- ALWAYS respond in the SAME LANGUAGE as the conversation
-- If language unclear, default to ENGLISH
+CRITICAL LANGUAGE RULE:
+- YOU MUST respond in the EXACT SAME LANGUAGE as the conversation
+- If conversation is English → respond ONLY in English
+- If conversation is Italian → respond ONLY in Italian
+- If conversation is Spanish → respond ONLY in Spanish
+- Never mix languages or switch languages mid-suggestion
+
+SUGGESTION TYPES (vary your responses):
+1. Strategic Questions (30%) - Ask powerful discovery or closing questions
+2. Market Insights (25%) - Share relevant market data, trends, statistics, industry benchmarks
+3. Value Statements (25%) - Articulate ROI, benefits, competitive advantages with frameworks
+4. Tactical Advice (20%) - Specific next steps, objection handling techniques
+
+GUIDELINES:
+- Max 25 words per suggestion
+- Be concrete and actionable
+- Include specific frameworks, methodologies, or data points when relevant
+- Examples: "Industry average is X%", "Gartner reports show...", "ROI typically 3-5x within 6 months"
+- Vary suggestion types - not just questions!
+- NO invented pricing or company-specific data
+- Match the sophistication level to the conversation
 
 CATEGORIES:
-- conversational: Open questions, discovery, rapport
-- value: Objection handling, ROI, benefits
-- closing: Next steps, commitment, closing
-- market: Positioning, competitors, context
+- conversational: Discovery, rapport building, needs analysis
+- value: ROI discussion, benefits, objection handling, competitive positioning  
+- closing: Next steps, commitments, trial closes, timeline
+- market: Industry trends, competitor landscape, market positioning, benchmarks
 
-Response format:
-[CATEGORY] Brief and clear suggestion
+Response format: [CATEGORY] Your suggestion
 
-LANGUAGE DETECTION:
-- If conversation is in Italian → respond in Italian
-- If conversation is in English → respond in English
-- If conversation is in Spanish → respond in Spanish
-- If conversation is in French → respond in French
-- If conversation is in German → respond in German
-- If unclear → default to English`;
+REMEMBER: Always respond in the same language as the input!`;
+
 
 // ==========================================
 // WEBSOCKET CONNECTION HANDLER
@@ -118,7 +125,7 @@ wss.on('connection', (ws: WebSocket) => {
   let deepgramLive: any = null;
   let conversationHistory: string[] = [];
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 2000; // 2 secondi tra suggerimenti (era 5)
+  const SUGGESTION_DEBOUNCE_MS = 500; // 0.5 secondi - suggerimenti molto frequenti!
 
   // Inizializza Deepgram Live Transcription
   try {
@@ -156,7 +163,7 @@ wss.on('connection', (ws: WebSocket) => {
       console.log(`📝 Trascrizione [${isFinal ? 'FINAL' : 'interim'}]: "${text}" (conf: ${confidence.toFixed(2)})`);
 
       // Invia trascrizione al client
-      if (isFinal && confidence >= 0.6) { // Abbassato da 0.7 a 0.6 (60%)
+      if (isFinal && confidence >= 0.5) { // Abbassato a 50% per più suggerimenti
         ws.send(JSON.stringify({
           type: 'transcript',
           text: text,
@@ -183,7 +190,7 @@ wss.on('connection', (ws: WebSocket) => {
         } else {
           console.log(`⏱️ Suggerimento skippato (debounce: ${Math.round((now - lastSuggestionTime) / 1000)}s / ${SUGGESTION_DEBOUNCE_MS / 1000}s)`);
         }
-      } else if (isFinal && confidence < 0.6) {
+      } else if (isFinal && confidence < 0.5) {
         // Log trascrizioni scartate per confidence bassa
         console.log(`⚠️ Trascrizione ignorata (confidence troppo bassa: ${confidence.toFixed(2)})`);
       }
@@ -293,11 +300,11 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
         },
         {
           role: 'user',
-          content: `Conversation context:\n${contextText}\n\nLatest phrase: "${currentText}"\n\nProvide a brief suggestion in ${detectedLanguage}.`
+          content: `Conversation context:\n${contextText}\n\nLatest phrase: "${currentText}"\n\nIMPORTANT: The conversation is in ${detectedLanguage}. You MUST respond ONLY in ${detectedLanguage}. Provide a brief, actionable suggestion (question, insight, data point, or advice).`
         }
       ],
-      max_tokens: 100,
-      temperature: 0.7,
+      max_tokens: 150,
+      temperature: 0.8,
       stream: false
     });
 
