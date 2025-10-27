@@ -118,7 +118,7 @@ wss.on('connection', (ws: WebSocket) => {
   let deepgramLive: any = null;
   let conversationHistory: string[] = [];
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 5000; // 5 secondi tra suggerimenti
+  const SUGGESTION_DEBOUNCE_MS = 2000; // 2 secondi tra suggerimenti (era 5)
 
   // Inizializza Deepgram Live Transcription
   try {
@@ -156,7 +156,7 @@ wss.on('connection', (ws: WebSocket) => {
       console.log(`📝 Trascrizione [${isFinal ? 'FINAL' : 'interim'}]: "${text}" (conf: ${confidence.toFixed(2)})`);
 
       // Invia trascrizione al client
-      if (isFinal && confidence >= 0.7) {
+      if (isFinal && confidence >= 0.6) { // Abbassato da 0.7 a 0.6 (60%)
         ws.send(JSON.stringify({
           type: 'transcript',
           text: text,
@@ -170,12 +170,22 @@ wss.on('connection', (ws: WebSocket) => {
           conversationHistory.shift(); // Mantieni solo ultime 10 frasi
         }
 
-        // Genera suggerimento AI
+        // Genera suggerimento AI più frequentemente (non-blocking)
         const now = Date.now();
         if (now - lastSuggestionTime > SUGGESTION_DEBOUNCE_MS) {
           lastSuggestionTime = now;
-          await generateSuggestion(ws, text, conversationHistory);
+          // Generate suggestion in background - don't wait for it
+          generateSuggestion(ws, text, conversationHistory).catch(err => {
+            console.error('❌ Errore async generazione suggerimento:', err);
+            // Reset timer on error so next suggestion can be generated
+            lastSuggestionTime = 0;
+          });
+        } else {
+          console.log(`⏱️ Suggerimento skippato (debounce: ${Math.round((now - lastSuggestionTime) / 1000)}s / ${SUGGESTION_DEBOUNCE_MS / 1000}s)`);
         }
+      } else if (isFinal && confidence < 0.6) {
+        // Log trascrizioni scartate per confidence bassa
+        console.log(`⚠️ Trascrizione ignorata (confidence troppo bassa: ${confidence.toFixed(2)})`);
       }
     });
 
@@ -269,7 +279,12 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
     const detectedLanguage = detectLanguage(currentText);
     console.log(`🌍 Lingua rilevata: ${detectedLanguage}`);
     
-    const completion = await openai.chat.completions.create({
+    // Add timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('OpenAI timeout')), 10000)
+    );
+    
+    const completionPromise = openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
@@ -286,6 +301,8 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
       stream: false
     });
 
+    const completion = await Promise.race([completionPromise, timeoutPromise]) as any;
+    
     const suggestionText = completion.choices[0]?.message?.content?.trim();
     
     if (!suggestionText) {
@@ -317,16 +334,21 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
 
     console.log(`✅ Suggerimento generato [${category}]: ${cleanedText}`);
 
-    // Invia suggerimento al client
-    ws.send(JSON.stringify({
-      type: 'suggestion',
-      text: cleanedText,
-      category: category,
-      timestamp: new Date().toISOString()
-    }));
+    // Invia suggerimento al client (check if WebSocket is still open)
+    if (ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'suggestion',
+        text: cleanedText,
+        category: category,
+        timestamp: new Date().toISOString()
+      }));
+    } else {
+      console.warn('⚠️ WebSocket non aperto, suggerimento non inviato');
+    }
 
-  } catch (error) {
-    console.error('❌ Errore generazione suggerimento:', error);
+  } catch (error: any) {
+    console.error('❌ Errore generazione suggerimento:', error.message || error);
+    // Non bloccare il flusso - il prossimo suggerimento verrà generato normalmente
   }
 }
 
