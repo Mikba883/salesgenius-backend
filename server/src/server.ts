@@ -81,24 +81,33 @@ const CATEGORIES = {
 // ==========================================
 // PROMPT AI
 // ==========================================
-const SYSTEM_PROMPT = `Sei un assistente AI esperto in vendite B2B. 
-Analizza la conversazione e fornisci suggerimenti brevi, concreti e actionable in tempo reale.
+const SYSTEM_PROMPT = `You are an expert B2B sales AI assistant.
+Analyze the conversation and provide brief, concrete, and actionable suggestions in real-time.
 
-REGOLE CRITICHE:
-- Suggerimenti MAX 20 parole
-- Actionable e specifici
-- NO dati inventati (prezzi, metriche, ROI specifici)
-- Suggerisci DOMANDE strategiche o FRAMEWORK
-- Rispondi nella STESSA LINGUA della conversazione
+CRITICAL RULES:
+- Suggestions MAX 20 words
+- Actionable and specific
+- NO invented data (prices, metrics, specific ROI)
+- Suggest strategic QUESTIONS or FRAMEWORKS
+- ALWAYS respond in the SAME LANGUAGE as the conversation
+- If language unclear, default to ENGLISH
 
-CATEGORIE:
-- conversational: Domande aperte, discovery, rapport
-- value: Gestione obiezioni, ROI, benefici
-- closing: Next steps, commitment, chiusura
-- market: Posizionamento, competitor, contesto
+CATEGORIES:
+- conversational: Open questions, discovery, rapport
+- value: Objection handling, ROI, benefits
+- closing: Next steps, commitment, closing
+- market: Positioning, competitors, context
 
-Formato risposta:
-[CATEGORIA] Suggerimento breve e chiaro`;
+Response format:
+[CATEGORY] Brief and clear suggestion
+
+LANGUAGE DETECTION:
+- If conversation is in Italian → respond in Italian
+- If conversation is in English → respond in English
+- If conversation is in Spanish → respond in Spanish
+- If conversation is in French → respond in French
+- If conversation is in German → respond in German
+- If unclear → default to English`;
 
 // ==========================================
 // WEBSOCKET CONNECTION HANDLER
@@ -256,6 +265,10 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
 
     const contextText = history.slice(-5).join('\n');
     
+    // Detect language from conversation
+    const detectedLanguage = detectLanguage(currentText);
+    console.log(`🌍 Lingua rilevata: ${detectedLanguage}`);
+    
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -265,7 +278,7 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
         },
         {
           role: 'user',
-          content: `Contesto conversazione:\n${contextText}\n\nUltima frase: "${currentText}"\n\nFornisci un suggerimento breve.`
+          content: `Conversation context:\n${contextText}\n\nLatest phrase: "${currentText}"\n\nProvide a brief suggestion in ${detectedLanguage}.`
         }
       ],
       max_tokens: 100,
@@ -286,9 +299,9 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
     
     if (lowerText.includes('[value]') || lowerText.includes('roi') || lowerText.includes('benefic')) {
       category = 'value';
-    } else if (lowerText.includes('[closing]') || lowerText.includes('prossim') || lowerText.includes('demo')) {
+    } else if (lowerText.includes('[closing]') || lowerText.includes('prossim') || lowerText.includes('demo') || lowerText.includes('next')) {
       category = 'closing';
-    } else if (lowerText.includes('[market]') || lowerText.includes('competitor') || lowerText.includes('mercato')) {
+    } else if (lowerText.includes('[market]') || lowerText.includes('competitor') || lowerText.includes('mercato') || lowerText.includes('market')) {
       category = 'market';
     } else if (lowerText.includes('[conversational]')) {
       category = 'conversational';
@@ -315,6 +328,36 @@ async function generateSuggestion(ws: WebSocket, currentText: string, history: s
   } catch (error) {
     console.error('❌ Errore generazione suggerimento:', error);
   }
+}
+
+// ==========================================
+// DETECT LANGUAGE
+// ==========================================
+function detectLanguage(text: string): string {
+  const lowerText = text.toLowerCase();
+  
+  // Italian indicators
+  if (lowerText.match(/\b(sono|che|per|come|hai|posso|grazie|ciao|questo|quella)\b/)) {
+    return 'Italian';
+  }
+  
+  // Spanish indicators
+  if (lowerText.match(/\b(es|son|que|como|por|para|puede|hola|gracias)\b/)) {
+    return 'Spanish';
+  }
+  
+  // French indicators
+  if (lowerText.match(/\b(est|sont|que|comme|pour|peut|bonjour|merci)\b/)) {
+    return 'French';
+  }
+  
+  // German indicators
+  if (lowerText.match(/\b(ist|sind|das|wie|für|kann|hallo|danke)\b/)) {
+    return 'German';
+  }
+  
+  // Default to English
+  return 'English';
 }
 
 // ==========================================
