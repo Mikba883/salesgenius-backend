@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SalesGenius Teleprompter</title>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo {
+            font-size: 24px;
+        }
+
+        .title {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-indicator.active {
+            background: #10b981;
+            box-shadow: 0 0 10px #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .controls {
+            padding: 15px 20px;
+            background: #1a1a1a;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        #startBtn {
+            background: #10b981;
+            color: white;
+        }
+
+        #startBtn:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-1px);
+        }
+
+        #startBtn:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
+        #stopBtn {
+            background: #ef4444;
+            color: white;
+        }
+
+        #stopBtn:hover:not(:disabled) {
+            background: #dc2626;
+        }
+
+        #stopBtn:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .content::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        .suggestion {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border-left: 4px solid #10b981;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            animation: slideIn 0.3s ease-out;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .suggestion.conversational {
+            border-left-color: #667eea;
+        }
+
+        .suggestion.value {
+            border-left-color: #f59e0b;
+        }
+
+        .suggestion.closing {
+            border-left-color: #10b981;
+        }
+
+        .suggestion.market {
+            border-left-color: #8b5cf6;
+        }
+
+        .suggestion-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .suggestion-icon {
+            font-size: 18px;
+        }
+
+        .suggestion-category {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #9ca3af;
+        }
+
+        .suggestion-time {
+            margin-left: auto;
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .suggestion-text {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #ffffff;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6b7280;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.3;
+        }
+
+        .empty-text {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .transcript-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid #10b981;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #10b981;
+            display: none;
+        }
+
+        .transcript-indicator.active {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <span class="logo">🎯</span>
+            <span class="title">AI Teleprompter</span>
+        </div>
+        <div class="status-indicator" id="statusIndicator"></div>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn">▶️ Start Capture</button>
+        <button id="stopBtn" disabled>⏹️ Stop</button>
+    </div>
+
+    <div class="content" id="content">
+        <div class="empty-state">
+            <div class="empty-icon">🎤</div>
+            <div class="empty-text">
+                Click "Start Capture" and select your call tab<br>
+                AI suggestions will appear here in real-time
+            </div>
+        </div>
+    </div>
+
+    <div class="transcript-indicator" id="transcriptIndicator">
+        🎤 Listening...
+    </div>
+
+    <script>
+        const WS_URL = 'wss://salesgenius-backend.onrender.com';
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const content = document.getElementById('content');
+        const transcriptIndicator = document.getElementById('transcriptIndicator');
+
+        let ws = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let processor = null;
+        let isRecording = false;
+
+        const categoryIcons = {
+            conversational: '🎧',
+            value: '💎',
+            closing: '✅',
+            market: '🌐'
+        };
+
+        const categoryLabels = {
+            conversational: 'Discovery',
+            value: 'Value',
+            closing: 'Closing',
+            market: 'Market'
+        };
+
+        // Listen for messages from parent window
+        window.addEventListener('message', (event) => {
+            const data = event.data;
+            console.log('📨 Message from parent:', data);
+
+            if (data.type === 'suggestion') {
+                addSuggestion(data);
+            } else if (data.type === 'transcript') {
+                showTranscriptIndicator();
+            }
+        });
+
+        // Start audio capture
+        startBtn.addEventListener('click', async () => {
+            try {
+                console.log('🎤 Starting audio capture...');
+
+                // Request screen share with audio
+                mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    },
+                    video: true
+                });
+
+                // Stop video track immediately
+                const videoTracks = mediaStream.getVideoTracks();
+                videoTracks.forEach(track => track.stop());
+
+                const audioTracks = mediaStream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    throw new Error('No audio track found. Make sure to check "Share audio"!');
+                }
+
+                console.log('✅ Audio track captured');
+
+                // Connect WebSocket
+                connectWebSocket();
+
+                // Setup audio processing
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                processor.onaudioprocess = (e) => {
+                    if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    const pcm16 = float32ToPCM16(inputData);
+                    ws.send(pcm16.buffer);
+                };
+
+                // Handle stream end
+                mediaStream.getAudioTracks()[0].onended = () => {
+                    console.log('⚠️ Audio stream ended');
+                    stopCapture();
+                };
+
+                isRecording = true;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                statusIndicator.classList.add('active');
+
+                // Clear empty state
+                content.innerHTML = '';
+
+                console.log('✅ Recording started');
+
+            } catch (err) {
+                console.error('❌ Error starting capture:', err);
+                alert('Error: ' + err.message);
+            }
+        });
+
+        // Stop capture
+        stopBtn.addEventListener('click', stopCapture);
+
+        function stopCapture() {
+            console.log('⏹️ Stopping capture...');
+
+            isRecording = false;
+
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusIndicator.classList.remove('active');
+
+            console.log('✅ Capture stopped');
+        }
+
+        // Connect WebSocket
+        function connectWebSocket() {
+            console.log('🔌 Connecting WebSocket...');
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log('✅ WebSocket connected');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('📨 WebSocket message:', data);
+
+                    if (data.type === 'suggestion') {
+                        addSuggestion(data);
+                    } else if (data.type === 'transcript') {
+                        showTranscriptIndicator();
+                    }
+                } catch (err) {
+                    console.error('❌ Error parsing message:', err);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+            };
+
+            ws.onclose = () => {
+                console.log('🔌 WebSocket closed');
+            };
+        }
+
+        // Add suggestion to display
+        function addSuggestion(data) {
+            const suggestion = document.createElement('div');
+            suggestion.className = `suggestion ${data.category || 'conversational'}`;
+
+            const time = new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+
+            const icon = categoryIcons[data.category] || '💡';
+            const label = categoryLabels[data.category] || 'Suggestion';
+
+            suggestion.innerHTML = `
+                <div class="suggestion-header">
+                    <span class="suggestion-icon">${icon}</span>
+                    <span class="suggestion-category">${label}</span>
+                    <span class="suggestion-time">${time}</span>
+                </div>
+                <div class="suggestion-text">${data.text}</div>
+            `;
+
+            content.insertBefore(suggestion, content.firstChild);
+
+            // Keep only last 20 suggestions
+            while (content.children.length > 20) {
+                content.removeChild(content.lastChild);
+            }
+        }
+
+        // Show transcript indicator briefly
+        function showTranscriptIndicator() {
+            transcriptIndicator.classList.add('active');
+            setTimeout(() => {
+                transcriptIndicator.classList.remove('active');
+            }, 2000);
+        }
+
+        // Convert Float32 to PCM16
+        function float32ToPCM16(float32Array) {
+            const pcm16 = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+                const s = Math.max(-1, Math.min(1, float32Array[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return pcm16;
+        }
+
+        // Cleanup on close
+        window.addEventListener('beforeunload', () => {
+            stopCapture();
+        });
+
+        console.log('🚀 PiP Teleprompter loaded');
+    </script>
+</body>
+</html>
