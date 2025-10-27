@@ -167,14 +167,16 @@ wss.on('connection', (ws: WebSocket) => {
 
     deepgramLive.on(LiveTranscriptionEvents.Error, (error: any) => {
       console.error('❌ Deepgram error:', error);
+      console.error('❌ Error details:', JSON.stringify(error, null, 2));
       ws.send(JSON.stringify({
         type: 'error',
-        message: 'Errore nella trascrizione'
+        message: 'Errore nella trascrizione: ' + (error.message || 'Errore sconosciuto')
       }));
     });
 
-    deepgramLive.on(LiveTranscriptionEvents.Close, () => {
+    deepgramLive.on(LiveTranscriptionEvents.Close, (closeEvent: any) => {
       console.log('🔌 Deepgram disconnesso');
+      console.log('🔌 Close reason:', closeEvent);
     });
 
   } catch (error) {
@@ -188,18 +190,34 @@ wss.on('connection', (ws: WebSocket) => {
   // ==========================================
   // WEBSOCKET MESSAGE HANDLER
   // ==========================================
+  let audioChunksReceived = 0;
+  
   ws.on('message', (message: Buffer) => {
     try {
       // Controlla se è audio binario o JSON
       if (message instanceof Buffer) {
+        audioChunksReceived++;
+        
+        // Log ogni 50 chunks per non intasare
+        if (audioChunksReceived % 50 === 0) {
+          console.log(`📊 Audio ricevuto: ${audioChunksReceived} chunks (ultimo: ${message.length} bytes)`);
+        }
+        
         // Audio PCM16
         if (deepgramLive && deepgramLive.getReadyState() === 1) {
           deepgramLive.send(message);
+          
+          // Debug: log invio a Deepgram
+          if (audioChunksReceived === 1) {
+            console.log(`🎤 Primo chunk audio inviato a Deepgram (${message.length} bytes)`);
+          }
+        } else {
+          console.warn(`⚠️ Deepgram non pronto! ReadyState: ${deepgramLive?.getReadyState() || 'null'}`);
         }
       } else {
         // Messaggio JSON (per future estensioni)
         const data = JSON.parse(message.toString());
-        console.log('📨 Messaggio ricevuto:', data);
+        console.log('📨 Messaggio JSON ricevuto:', data);
       }
     } catch (error) {
       console.error('❌ Errore processing message:', error);
