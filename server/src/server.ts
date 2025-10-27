@@ -1,472 +1,324 @@
-import 'dotenv/config';
-import WebSocket from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer } from 'http';
+import express from 'express';
+import cors from 'cors';
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
 import OpenAI from 'openai';
-import { v4 as uuidv4 } from 'uuid';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
-import { buildMessages, detectLanguage, QUALITY_PRESETS } from './prompts.js';
+import dotenv from 'dotenv';
 
-// =============================================================================
+dotenv.config();
+
+// ==========================================
 // CONFIGURAZIONE
-// =============================================================================
-
-const PORT = Number(process.env.PORT) || 8080;
+// ==========================================
+const PORT = parseInt(process.env.PORT || '8080', 10);
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY!;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-const deepgram = createClient(DEEPGRAM_API_KEY);
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+// ==========================================
+// SETUP EXPRESS + CORS
+// ==========================================
+const app = express();
 
-// Supabase client con SERVICE ROLE KEY (può bypassare RLS)
-const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
+// IMPORTANTE: Abilita CORS per permettere richieste dal browser
+app.use(cors({
+  origin: '*', // Permetti tutte le origini (puoi restringere in produzione)
+  credentials: true
+}));
+
+app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
 });
 
-// Quality preset (change to 'fast' or 'premium' as needed)
-const QUALITY_MODE = process.env.QUALITY_MODE || 'balanced';
-const openAIConfig = QUALITY_PRESETS[QUALITY_MODE as keyof typeof QUALITY_PRESETS];
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    app: 'SalesGenius Backend',
+    status: 'running',
+    websocket: 'ws://' + req.headers.host
+  });
+});
 
-// Categorie e regole
-type CategoryKey = 'conversational' | 'value' | 'closing' | 'market';
+// ==========================================
+// HTTP SERVER
+// ==========================================
+const server = createServer(app);
 
-const CATEGORY_KEYWORDS: Record<CategoryKey, string[]> = {
-  conversational: ['tell me', 'explain', 'understand', 'curious', 'what', 'how', 'why', 'can you'],
-  value: ['price', 'cost', 'expensive', 'budget', 'roi', 'worth', 'benefit', 'concern', 'worried'],
-  closing: ['next step', 'decision', 'timeline', 'when', 'ready', 'contract', 'sign', 'agreement'],
-  market: ['competitor', 'market', 'industry', 'trend', 'comparison', 'alternative', 'others'],
+// ==========================================
+// WEBSOCKET SERVER
+// ==========================================
+const wss = new WebSocketServer({ server });
+
+// ==========================================
+// DEEPGRAM CLIENT
+// ==========================================
+const deepgram = createClient(DEEPGRAM_API_KEY);
+
+// ==========================================
+// OPENAI CLIENT
+// ==========================================
+const openai = new OpenAI({
+  apiKey: OPENAI_API_KEY,
+});
+
+// ==========================================
+// CATEGORIE SUGGERIMENTI
+// ==========================================
+const CATEGORIES = {
+  conversational: 'conversational',
+  value: 'value',
+  closing: 'closing',
+  market: 'market'
 };
 
-// Debounce per evitare troppi suggerimenti
-const SUGGESTION_DEBOUNCE_MS = 180;
+// ==========================================
+// PROMPT AI
+// ==========================================
+const SYSTEM_PROMPT = `Sei un assistente AI esperto in vendite B2B. 
+Analizza la conversazione e fornisci suggerimenti brevi, concreti e actionable in tempo reale.
 
-// =============================================================================
-// SERVER WEBSOCKET
-// =============================================================================
+REGOLE CRITICHE:
+- Suggerimenti MAX 20 parole
+- Actionable e specifici
+- NO dati inventati (prezzi, metriche, ROI specifici)
+- Suggerisci DOMANDE strategiche o FRAMEWORK
+- Rispondi nella STESSA LINGUA della conversazione
 
-const wss = new WebSocket.Server({ port: PORT });
+CATEGORIE:
+- conversational: Domande aperte, discovery, rapport
+- value: Gestione obiezioni, ROI, benefici
+- closing: Next steps, commitment, chiusura
+- market: Posizionamento, competitor, contesto
 
-console.log(`🚀 SalesGenius Backend running on ws://localhost:${PORT}`);
+Formato risposta:
+[CATEGORIA] Suggerimento breve e chiaro`;
 
-// =============================================================================
-// HTTP SERVER FOR HEALTH CHECKS
-// =============================================================================
-
-import http from 'http';
-
-const httpServer = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      connections: wss.clients.size,
-    }));
-  } else {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not Found');
-  }
-});
-
-const HTTP_PORT = Number(PORT) + 1; // Health check on PORT+1
-httpServer.listen(HTTP_PORT, () => {
-  console.log(`❤️  Health check available at http://localhost:${HTTP_PORT}/health`);
-});
-
+// ==========================================
+// WEBSOCKET CONNECTION HANDLER
+// ==========================================
 wss.on('connection', (ws: WebSocket) => {
-  console.log('📱 Client connected');
+  console.log('🔌 Nuovo client connesso');
 
-  const state = {
-    deepgramLive: null as any,
-    currentSuggestionId: null as string | null,
-    lastSuggestionTime: 0,
-    transcriptBuffer: [] as string[],
-    abortController: null as AbortController | null,
-    
-    // User authentication state
-    authenticated: false,
-    userId: null as string | null,
-    userEmail: null as string | null,
-    sessionId: uuidv4(),
-    connectedAt: new Date(),
-  };
+  let deepgramLive: any = null;
+  let conversationHistory: string[] = [];
+  let lastSuggestionTime = 0;
+  const SUGGESTION_DEBOUNCE_MS = 5000; // 5 secondi tra suggerimenti
 
-  // -------------------------------------------------------------------------
-  // Setup Deepgram Live
-  // -------------------------------------------------------------------------
-  const setupDeepgram = () => {
-    try {
-      const dgLive = deepgram.listen.live({
-        model: 'nova-2',
-        language: 'it', // Cambia in 'en' se serve inglese
-        smart_format: true,
-        interim_results: true,
-        punctuate: true,
-        utterance_end_ms: 1200,
-      });
-
-      // Transcript handler
-      dgLive.on(LiveTranscriptionEvents.Transcript, (data: any) => {
-        const transcript = data.channel?.alternatives?.[0];
-        if (!transcript) return;
-
-        const text = transcript.transcript?.trim();
-        if (!text) return;
-
-        const isFinal = data.is_final;
-        const confidence = transcript.confidence || 0;
-
-        console.log(`🎤 [${isFinal ? 'FINAL' : 'interim'}] (${confidence.toFixed(2)}): ${text}`);
-
-        // Solo finale con confidenza sufficiente
-        if (isFinal && confidence >= 0.7) {
-          state.transcriptBuffer.push(text);
-
-          // Tronca buffer a ultimi ~10 frasi
-          if (state.transcriptBuffer.length > 10) {
-            state.transcriptBuffer = state.transcriptBuffer.slice(-10);
-          }
-
-          // Trigger suggerimento con debounce
-          handleTranscriptForSuggestion(text);
-        }
-      });
-
-      dgLive.on(LiveTranscriptionEvents.Error, (err: any) => {
-        console.error('❌ Deepgram error:', err);
-      });
-
-      dgLive.on(LiveTranscriptionEvents.Close, () => {
-        console.log('🔌 Deepgram connection closed');
-      });
-
-      state.deepgramLive = dgLive;
-
-    } catch (error) {
-      console.error('❌ Failed to setup Deepgram:', error);
-    }
-  };
-
-  setupDeepgram();
-
-  // -------------------------------------------------------------------------
-  // Classificazione categoria + Trigger LLM
-  // -------------------------------------------------------------------------
-  const handleTranscriptForSuggestion = async (text: string) => {
-    const now = Date.now();
-
-    // Debounce
-    if (now - state.lastSuggestionTime < SUGGESTION_DEBOUNCE_MS) {
-      return;
-    }
-
-    state.lastSuggestionTime = now;
-
-    // Classifica categoria
-    const category = classifyCategory(text);
-    console.log(`🏷️  Category: ${category}`);
-
-    // Chiudi stream precedente se esiste
-    if (state.abortController) {
-      state.abortController.abort();
-    }
-
-    // Genera nuovo suggerimento
-    await generateSuggestion(category, text);
-  };
-
-  // -------------------------------------------------------------------------
-  // Classificazione semplice basata su keyword
-  // -------------------------------------------------------------------------
-  const classifyCategory = (text: string): CategoryKey => {
-    const lower = text.toLowerCase();
-    let maxScore = 0;
-    let bestCategory: CategoryKey = 'conversational';
-
-    for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-      const score = keywords.filter(kw => lower.includes(kw)).length;
-      if (score > maxScore) {
-        maxScore = score;
-        bestCategory = cat as CategoryKey;
-      }
-    }
-
-    return bestCategory;
-  };
-
-  // -------------------------------------------------------------------------
-  // Genera suggerimento via OpenAI streaming
-  // -------------------------------------------------------------------------
-  const generateSuggestion = async (category: CategoryKey, lastUtterance: string) => {
-    const startTime = Date.now();
-    const suggestionId = uuidv4();
-    state.currentSuggestionId = suggestionId;
-
-    // Abort controller per interrompere stream
-    const abortController = new AbortController();
-    state.abortController = abortController;
-
-    // Context dalle ultime frasi
-    const context = state.transcriptBuffer.slice(-5).join(' ');
-    
-    // Conversation history per migliore context awareness
-    const conversationHistory = state.transcriptBuffer.slice(-6).map((t, i) => ({
-      role: i % 2 === 0 ? 'customer' : 'seller',
-      content: t
-    }));
-
-    // Detect language
-    const detectedLang = detectLanguage(lastUtterance);
-    console.log(`🌍 Language detected: ${detectedLang.toUpperCase()}`);
-
-    // Build optimized messages using new prompt system
-    const messages = buildMessages({
-      category,
-      transcript: lastUtterance,
-      context,
-      conversationHistory,
+  // Inizializza Deepgram Live Transcription
+  try {
+    deepgramLive = deepgram.listen.live({
+      model: 'nova-2',
+      language: 'it',
+      smart_format: true,
+      interim_results: true,
+      utterance_end_ms: 1000,
+      vad_events: true,
     });
 
+    // ==========================================
+    // DEEPGRAM EVENTS
+    // ==========================================
+    deepgramLive.on(LiveTranscriptionEvents.Open, () => {
+      console.log('✅ Deepgram connesso');
+    });
+
+    deepgramLive.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
+      const transcript = data.channel?.alternatives?.[0];
+      if (!transcript) return;
+
+      const text = transcript.transcript?.trim();
+      const isFinal = data.is_final;
+      const confidence = transcript.confidence || 0;
+
+      if (!text) return;
+
+      console.log(`📝 Trascrizione [${isFinal ? 'FINAL' : 'interim'}]: "${text}" (conf: ${confidence.toFixed(2)})`);
+
+      // Invia trascrizione al client
+      if (isFinal && confidence >= 0.7) {
+        ws.send(JSON.stringify({
+          type: 'transcript',
+          text: text,
+          confidence: confidence,
+          timestamp: new Date().toISOString()
+        }));
+
+        // Aggiungi alla storia conversazione
+        conversationHistory.push(text);
+        if (conversationHistory.length > 10) {
+          conversationHistory.shift(); // Mantieni solo ultime 10 frasi
+        }
+
+        // Genera suggerimento AI
+        const now = Date.now();
+        if (now - lastSuggestionTime > SUGGESTION_DEBOUNCE_MS) {
+          lastSuggestionTime = now;
+          await generateSuggestion(ws, text, conversationHistory);
+        }
+      }
+    });
+
+    deepgramLive.on(LiveTranscriptionEvents.Error, (error: any) => {
+      console.error('❌ Deepgram error:', error);
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Errore nella trascrizione'
+      }));
+    });
+
+    deepgramLive.on(LiveTranscriptionEvents.Close, () => {
+      console.log('🔌 Deepgram disconnesso');
+    });
+
+  } catch (error) {
+    console.error('❌ Errore inizializzazione Deepgram:', error);
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Errore inizializzazione trascrizione'
+    }));
+  }
+
+  // ==========================================
+  // WEBSOCKET MESSAGE HANDLER
+  // ==========================================
+  ws.on('message', (message: Buffer) => {
     try {
-      // Invia start
-      sendJSON(ws, {
-        type: 'suggestion.start',
-        id: suggestionId,
-        category,
-      });
-
-      // Stream OpenAI with quality preset
-      const stream = await openai.chat.completions.create(
-        {
-          ...openAIConfig, // Uses balanced/fast/premium preset
-          messages,
-          stream: true,
-        },
-        { signal: abortController.signal }
-      );
-
-      let fullText = '';
-      let isFirstToken = true;
-
-      for await (const chunk of stream) {
-        if (abortController.signal.aborted) break;
-
-        const delta = chunk.choices[0]?.delta?.content;
-        if (delta) {
-          fullText += delta;
-          
-          // Log first token latency
-          if (isFirstToken) {
-            const firstTokenLatency = Date.now() - startTime;
-            console.log(`⚡ First token in ${firstTokenLatency}ms`);
-            isFirstToken = false;
-          }
-          
-          sendJSON(ws, {
-            type: 'suggestion.delta',
-            id: suggestionId,
-            textChunk: delta,
-          });
+      // Controlla se è audio binario o JSON
+      if (message instanceof Buffer) {
+        // Audio PCM16
+        if (deepgramLive && deepgramLive.getReadyState() === 1) {
+          deepgramLive.send(message);
         }
-      }
-
-      // Invia end (se non abortato)
-      if (!abortController.signal.aborted) {
-        const totalLatency = Date.now() - startTime;
-        console.log(`✅ Suggestion complete in ${totalLatency}ms (${fullText.length} chars)`);
-        
-        sendJSON(ws, {
-          type: 'suggestion.end',
-          id: suggestionId,
-        });
-
-        // Log suggerimento in database con testo completo
-        if (state.authenticated && state.userId) {
-          await logSuggestion(state, suggestionId, category, fullText);
-        }
-      }
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log(`🚫 Stream aborted for suggestion ${suggestionId}`);
       } else {
-        console.error('❌ Error generating suggestion:', error);
-        sendJSON(ws, {
-          type: 'error',
-          message: 'Failed to generate suggestion',
-        });
+        // Messaggio JSON (per future estensioni)
+        const data = JSON.parse(message.toString());
+        console.log('📨 Messaggio ricevuto:', data);
       }
-    } finally {
-      if (state.currentSuggestionId === suggestionId) {
-        state.currentSuggestionId = null;
-        state.abortController = null;
-      }
-    }
-  };
-
-  // -------------------------------------------------------------------------
-  // Handler messaggi WebSocket dal client
-  // -------------------------------------------------------------------------
-  ws.on('message', async (data: WebSocket.Data) => {
-    try {
-      // Prova a parsare come JSON (header)
-      if (typeof data === 'string') {
-        const msg = JSON.parse(data);
-
-        if (msg.op === 'hello') {
-          console.log('👋 Client hello:', msg);
-          sendJSON(ws, { 
-            type: 'server.ready',
-            sessionId: state.sessionId,
-            requiresAuth: !!SUPABASE_URL,
-          });
-        }
-
-        if (msg.op === 'auth') {
-          // Autentica con JWT da Supabase
-          console.log('🔐 Authenticating user...');
-          
-          try {
-            const { data: { user }, error } = await supabase.auth.getUser(msg.jwt);
-            
-            if (error || !user) {
-              console.error('❌ Authentication failed:', error?.message);
-              sendJSON(ws, { 
-                type: 'error', 
-                message: 'Authentication failed. Please log in again.' 
-              });
-              ws.close();
-              return;
-            }
-
-            // Salva info utente
-            state.authenticated = true;
-            state.userId = user.id;
-            state.userEmail = user.email || null;
-
-            console.log(`✅ User authenticated: ${user.email} (${user.id})`);
-
-            // Log sessione in database (opzionale)
-            await logUserSession(state);
-
-            // Setup Deepgram ora che l'utente è autenticato
-            setupDeepgram();
-
-            sendJSON(ws, { 
-              type: 'auth.success',
-              user: {
-                id: user.id,
-                email: user.email,
-              }
-            });
-
-          } catch (error: any) {
-            console.error('❌ Auth error:', error);
-            sendJSON(ws, { type: 'error', message: 'Authentication error' });
-            ws.close();
-          }
-          return;
-        }
-
-        if (msg.op === 'audio') {
-          // Verifica autenticazione prima di processare audio
-          if (SUPABASE_URL && !state.authenticated) {
-            sendJSON(ws, { type: 'error', message: 'Not authenticated' });
-            return;
-          }
-          // Header del frame audio (prossimo messaggio sarà binario)
-        }
-
-      } else {
-        // Messaggio binario = frame PCM16
-        if (state.deepgramLive && data instanceof Buffer) {
-          // Verifica autenticazione
-          if (SUPABASE_URL && !state.authenticated) {
-            return;
-          }
-          state.deepgramLive.send(data);
-        }
-      }
-
     } catch (error) {
-      console.error('❌ Error handling message:', error);
+      console.error('❌ Errore processing message:', error);
     }
   });
 
-  // -------------------------------------------------------------------------
-  // Cleanup on disconnect
-  // -------------------------------------------------------------------------
+  // ==========================================
+  // WEBSOCKET CLOSE HANDLER
+  // ==========================================
   ws.on('close', () => {
-    console.log('🔌 Client disconnected');
-
-    // Chiudi Deepgram
-    if (state.deepgramLive) {
-      state.deepgramLive.finish();
-      state.deepgramLive = null;
-    }
-
-    // Abort stream LLM
-    if (state.abortController) {
-      state.abortController.abort();
+    console.log('👋 Client disconnesso');
+    if (deepgramLive) {
+      deepgramLive.finish();
     }
   });
 
+  // ==========================================
+  // WEBSOCKET ERROR HANDLER
+  // ==========================================
   ws.on('error', (error) => {
     console.error('❌ WebSocket error:', error);
   });
 });
 
-// =============================================================================
-// UTILITIES
-// =============================================================================
-
-function sendJSON(ws: WebSocket, data: any) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
-  }
-}
-
-// Log sessione utente in Supabase
-async function logUserSession(state: any) {
+// ==========================================
+// GENERA SUGGERIMENTO AI
+// ==========================================
+async function generateSuggestion(ws: WebSocket, currentText: string, history: string[]) {
   try {
-    await supabase.from('user_sessions').insert({
-      session_id: state.sessionId,
-      user_id: state.userId,
-      connected_at: state.connectedAt.toISOString(),
-      user_email: state.userEmail,
+    console.log('🤖 Generando suggerimento per:', currentText);
+
+    const contextText = history.slice(-5).join('\n');
+    
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: SYSTEM_PROMPT
+        },
+        {
+          role: 'user',
+          content: `Contesto conversazione:\n${contextText}\n\nUltima frase: "${currentText}"\n\nFornisci un suggerimento breve.`
+        }
+      ],
+      max_tokens: 100,
+      temperature: 0.7,
+      stream: false
     });
-    console.log('📊 Session logged');
+
+    const suggestionText = completion.choices[0]?.message?.content?.trim();
+    
+    if (!suggestionText) {
+      console.warn('⚠️ Nessun suggerimento generato');
+      return;
+    }
+
+    // Estrai categoria dal suggerimento
+    let category = 'conversational';
+    const lowerText = suggestionText.toLowerCase();
+    
+    if (lowerText.includes('[value]') || lowerText.includes('roi') || lowerText.includes('benefic')) {
+      category = 'value';
+    } else if (lowerText.includes('[closing]') || lowerText.includes('prossim') || lowerText.includes('demo')) {
+      category = 'closing';
+    } else if (lowerText.includes('[market]') || lowerText.includes('competitor') || lowerText.includes('mercato')) {
+      category = 'market';
+    } else if (lowerText.includes('[conversational]')) {
+      category = 'conversational';
+    }
+
+    // Pulisci il testo dal tag categoria
+    const cleanedText = suggestionText
+      .replace(/\[conversational\]/gi, '')
+      .replace(/\[value\]/gi, '')
+      .replace(/\[closing\]/gi, '')
+      .replace(/\[market\]/gi, '')
+      .trim();
+
+    console.log(`✅ Suggerimento generato [${category}]: ${cleanedText}`);
+
+    // Invia suggerimento al client
+    ws.send(JSON.stringify({
+      type: 'suggestion',
+      text: cleanedText,
+      category: category,
+      timestamp: new Date().toISOString()
+    }));
+
   } catch (error) {
-    console.error('⚠️  Failed to log session:', error);
+    console.error('❌ Errore generazione suggerimento:', error);
   }
 }
 
-// Log suggerimento generato
-async function logSuggestion(state: any, suggestionId: string, category: string, text: string) {
-  try {
-    await supabase.from('suggestions').insert({
-      suggestion_id: suggestionId,
-      session_id: state.sessionId,
-      user_id: state.userId,
-      category,
-      text,
-      created_at: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('⚠️  Failed to log suggestion:', error);
-  }
-}
+// ==========================================
+// START SERVER
+// ==========================================
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('🚀 SalesGenius Backend avviato');
+  console.log(`📡 HTTP Server: http://localhost:${PORT}`);
+  console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
+  console.log(`🌍 Health check: http://localhost:${PORT}/health`);
+});
 
-// Graceful shutdown
+// ==========================================
+// GRACEFUL SHUTDOWN
+// ==========================================
+process.on('SIGTERM', () => {
+  console.log('👋 SIGTERM ricevuto, chiusura graceful...');
+  server.close(() => {
+    console.log('✅ Server chiuso');
+    process.exit(0);
+  });
+});
+
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down...');
-  wss.close(() => {
-    console.log('✅ Server closed');
+  console.log('👋 SIGINT ricevuto, chiusura graceful...');
+  server.close(() => {
+    console.log('✅ Server chiuso');
     process.exit(0);
   });
 });
