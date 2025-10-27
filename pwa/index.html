@@ -1,688 +1,861 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0f172a">
-  
-  <!-- PWA Meta Tags -->
-  <meta name="description" content="AI Sales Assistant - Suggerimenti in tempo reale durante le tue chiamate">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="SalesGenius">
-  
-  <title>SalesGenius AI Assistant</title>
-  
-  <!-- PWA Manifest -->
-  <link rel="manifest" href="/manifest.json">
-  
-  <!-- Icons -->
-  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
-  <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
-  
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#667eea">
+    <meta name="description" content="Assistente AI in tempo reale per venditori B2B">
     
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-      color: #e2e8f0;
-      overflow-x: hidden;
-      padding: 0;
-      margin: 0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Minimal Draggable Header */
-    #app-header {
-      background: rgba(15, 23, 42, 0.95);
-      backdrop-filter: blur(10px);
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      cursor: move;
-      -webkit-app-region: drag;
-      user-select: none;
-    }
-
-    #app-header .title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #60a5fa;
-    }
-
-    #app-header .controls {
-      display: flex;
-      gap: 8px;
-      -webkit-app-region: no-drag;
-    }
-
-    .control-btn {
-      width: 28px;
-      height: 28px;
-      border: none;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.1);
-      color: #e2e8f0;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      font-size: 16px;
-    }
-
-    .control-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-    }
-
-    .control-btn.minimize:hover {
-      background: rgba(251, 191, 36, 0.2);
-      color: #fbbf24;
-    }
-
-    .control-btn.close:hover {
-      background: rgba(239, 68, 68, 0.2);
-      color: #ef4444;
-    }
-
-    /* Main Content */
-    #app-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    /* Status Bar */
-    .status-bar {
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(96, 165, 250, 0.3);
-      border-radius: 12px;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      backdrop-filter: blur(10px);
-    }
-
-    .status-bar.disconnected {
-      border-color: rgba(239, 68, 68, 0.3);
-    }
-
-    .status-bar.connected {
-      border-color: rgba(34, 197, 94, 0.3);
-    }
-
-    .status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #ef4444;
-    }
-
-    .status-dot.connected {
-      background: #22c55e;
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    .status-info {
-      display: flex;
-      gap: 16px;
-      font-size: 12px;
-      color: #94a3b8;
-    }
-
-    /* Start/Stop Button */
-    .action-button {
-      width: 100%;
-      padding: 14px;
-      border: none;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
-
-    .action-button.start {
-      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-      color: white;
-    }
-
-    .action-button.start:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);
-    }
-
-    .action-button.stop {
-      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-      color: white;
-    }
-
-    .action-button.stop:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);
-    }
-
-    .action-button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none !important;
-    }
-
-    /* Suggestions Container */
-    .suggestions-container {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      flex: 1;
-      min-height: 200px;
-    }
-
-    .suggestion-card {
-      background: rgba(15, 23, 42, 0.9);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 12px;
-      padding: 12px 14px;
-      animation: slideIn 0.3s ease-out;
-      backdrop-filter: blur(10px);
-    }
-
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .suggestion-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
-
-    .suggestion-category {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #60a5fa;
-    }
-
-    .suggestion-category .icon {
-      font-size: 16px;
-    }
-
-    .suggestion-status {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 6px;
-      font-weight: 500;
-    }
-
-    .suggestion-status.live {
-      background: rgba(34, 197, 94, 0.2);
-      color: #22c55e;
-      animation: pulse 2s infinite;
-    }
-
-    .suggestion-status.done {
-      background: rgba(100, 116, 139, 0.2);
-      color: #94a3b8;
-    }
-
-    .suggestion-text {
-      color: #e2e8f0;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: #64748b;
-    }
-
-    .empty-state .icon {
-      font-size: 48px;
-      margin-bottom: 12px;
-      opacity: 0.5;
-    }
-
-    .empty-state p {
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    /* Instructions */
-    .instructions {
-      background: rgba(59, 130, 246, 0.1);
-      border: 1px solid rgba(59, 130, 246, 0.3);
-      border-radius: 12px;
-      padding: 12px;
-      font-size: 12px;
-      color: #93c5fd;
-      line-height: 1.6;
-    }
-
-    .instructions strong {
-      color: #60a5fa;
-    }
-
-    /* Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: rgba(0, 0, 0, 0.2);
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: rgba(96, 165, 250, 0.3);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(96, 165, 250, 0.5);
-    }
-
-    /* Resize handle */
-    .resize-handle {
-      position: absolute;
-      bottom: 0;
-      right: 0;
-      width: 20px;
-      height: 20px;
-      cursor: nwse-resize;
-      opacity: 0.3;
-    }
-
-    .resize-handle::after {
-      content: '⋰';
-      position: absolute;
-      bottom: 2px;
-      right: 2px;
-      font-size: 16px;
-      color: #60a5fa;
-    }
-  </style>
-</head>
-<body>
-  <!-- Minimal Header -->
-  <div id="app-header">
-    <div class="title">
-      <span>🎯</span>
-      <span>SalesGenius AI</span>
-    </div>
-    <div class="controls">
-      <button class="control-btn minimize" onclick="minimizeApp()" title="Minimizza">−</button>
-      <button class="control-btn close" onclick="closeApp()" title="Chiudi">×</button>
-    </div>
-  </div>
-
-  <!-- Main Content -->
-  <div id="app-content">
-    <!-- Status Bar -->
-    <div class="status-bar" id="statusBar">
-      <div class="status-indicator">
-        <div class="status-dot" id="statusDot"></div>
-        <span id="statusText">Disconnesso</span>
-      </div>
-      <div class="status-info">
-        <span id="timerDisplay">00:00</span>
-        <span id="suggestionCount">0 tips</span>
-      </div>
-    </div>
-
-    <!-- Action Button -->
-    <button class="action-button start" id="actionButton" onclick="toggleSharing()">
-      <span>🎤</span>
-      <span>Avvia Assistente</span>
-    </button>
-
-    <!-- Instructions -->
-    <div class="instructions" id="instructions">
-      <strong>💡 Come usare:</strong><br>
-      1. Apri la tua chiamata (Meet/Zoom) in un'altra finestra<br>
-      2. Clicca "Avvia Assistente"<br>
-      3. Seleziona la finestra della chiamata e spunta "Condividi audio"<br>
-      4. Posiziona questa finestra sopra la chiamata per vedere i suggerimenti!
-    </div>
-
-    <!-- Suggestions Container -->
-    <div class="suggestions-container" id="suggestionsContainer">
-      <div class="empty-state">
-        <div class="icon">💬</div>
-        <p>I suggerimenti AI appariranno qui in tempo reale<br>durante la tua chiamata</p>
-      </div>
-    </div>
-  </div>
-
-  <script type="module">
-    // Configuration
-    const WS_URL = import.meta.env?.VITE_WS_URL || 'ws://localhost:8080';
+    <title>SalesGenius - AI Sales Assistant</title>
     
-    // Category metadata
-    const CATEGORY_META = {
-      conversational: { icon: "🎧", label: "Conversational" },
-      value: { icon: "💎", label: "Value & Objection" },
-      closing: { icon: "✅", label: "Closing" },
-      market: { icon: "🌐", label: "Market Intel" },
-    };
-
-    // State
-    let isSharing = false;
-    let ws = null;
-    let audioContext = null;
-    let mediaStream = null;
-    let workletNode = null;
-    let seq = 0;
-    let suggestions = [];
-    let timer = 0;
-    let timerInterval = null;
-
-    // DOM elements
-    const statusBar = document.getElementById('statusBar');
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    const actionButton = document.getElementById('actionButton');
-    const suggestionsContainer = document.getElementById('suggestionsContainer');
-    const timerDisplay = document.getElementById('timerDisplay');
-    const suggestionCount = document.getElementById('suggestionCount');
-    const instructions = document.getElementById('instructions');
-
-    // Start/Stop sharing
-    async function toggleSharing() {
-      if (!isSharing) {
-        await startSharing();
-      } else {
-        stopSharing();
-      }
-    }
-
-    async function startSharing() {
-      try {
-        // Request screen + audio
-        mediaStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-          },
-        });
-
-        const audioTrack = mediaStream.getAudioTracks()[0];
-        if (!audioTrack) {
-          throw new Error('Nessun audio condiviso. Spunta "Condividi audio" nel prompt!');
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
-        // Setup audio context
-        audioContext = new AudioContext({ sampleRate: 16000 });
-        
-        // Create audio worklet
-        const workletCode = `
-          class PCMWorklet extends AudioWorkletProcessor {
-            process(inputs) {
-              const input = inputs[0];
-              if (!input || !input[0]) return true;
-              const ch0 = input[0];
-              const pcm = new Int16Array(ch0.length);
-              for (let i = 0; i < ch0.length; i++) {
-                let s = Math.max(-1, Math.min(1, ch0[i]));
-                pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-              }
-              this.port.postMessage(pcm);
-              return true;
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5568d3;
+            --secondary: #764ba2;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --bg-main: #f9fafb;
+            --bg-card: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --border: #e5e7eb;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: var(--bg-card);
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 1000px;
+            width: 100%;
+            padding: 40px;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
             }
-          }
-          registerProcessor('pcm-worklet', PCMWorklet);
-        `;
-        
-        const blob = new Blob([workletCode], { type: 'application/javascript' });
-        const workletUrl = URL.createObjectURL(blob);
-        await audioContext.audioWorklet.addModule(workletUrl);
-        URL.revokeObjectURL(workletUrl);
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
 
-        const source = audioContext.createMediaStreamSource(mediaStream);
-        const gain = audioContext.createGain();
-        gain.gain.value = 1.0;
-        source.connect(gain);
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
 
-        workletNode = new AudioWorkletNode(audioContext, 'pcm-worklet', {
-          numberOfInputs: 1,
-          numberOfOutputs: 0,
-          channelCount: 1,
-        });
-        gain.connect(workletNode);
+        .logo {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
 
-        // Connect WebSocket
-        updateStatus('connecting', 'Connessione...');
-        ws = new WebSocket(WS_URL);
-        ws.binaryType = 'arraybuffer';
+        h1 {
+            color: var(--primary);
+            font-size: 32px;
+            font-weight: 700;
+        }
 
-        ws.onopen = () => {
-          updateStatus('connected', 'Connesso');
-          ws.send(JSON.stringify({
-            op: 'hello',
-            app: 'salesgenius-pwa',
-            version: '1.0',
-          }));
+        .subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
 
-          // TODO: Send JWT if authenticated
-        };
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            background: var(--bg-main);
+            border-radius: 12px;
+            border: 2px solid var(--border);
+        }
 
-        ws.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            handleWSMessage(msg);
-          } catch (e) {
-            console.error('Error parsing message:', e);
-          }
-        };
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ccc;
+            transition: all 0.3s;
+        }
 
-        ws.onerror = (e) => {
-          console.error('WebSocket error:', e);
-          updateStatus('disconnected', 'Errore connessione');
-        };
+        .status-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
 
-        ws.onclose = () => {
-          updateStatus('disconnected', 'Disconnesso');
-          stopSharing();
-        };
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
 
-        // Stream audio
-        workletNode.port.onmessage = (e) => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) return;
-          const pcm = e.data;
-          ws.send(JSON.stringify({ op: 'audio', seq: seq++, sr: 16000, ch: 1 }));
-          ws.send(pcm.buffer);
-        };
+        .status-text {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
 
-        // Auto-stop when user stops sharing
-        mediaStream.getVideoTracks()[0].addEventListener('ended', stopSharing);
+        .warning {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 2px solid var(--warning);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: start;
+            gap: 15px;
+        }
 
-        // Update UI
-        isSharing = true;
-        actionButton.classList.remove('start');
-        actionButton.classList.add('stop');
-        actionButton.innerHTML = '<span>⏹</span><span>Ferma Assistente</span>';
-        instructions.style.display = 'none';
-        
-        // Start timer
-        startTimer();
+        .warning-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
 
-      } catch (error) {
-        console.error('Error starting:', error);
-        alert(error.message);
-        updateStatus('disconnected', 'Errore');
-      }
-    }
+        .warning-text {
+            color: #92400e;
+            font-size: 14px;
+            line-height: 1.6;
+        }
 
-    function stopSharing() {
-      try {
-        workletNode?.disconnect();
-        audioContext?.close();
-        mediaStream?.getTracks().forEach(t => t.stop());
-        ws?.close();
-      } finally {
-        workletNode = null;
-        audioContext = null;
-        mediaStream = null;
-        ws = null;
-        seq = 0;
-        isSharing = false;
+        .warning-text strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
 
-        actionButton.classList.remove('stop');
-        actionButton.classList.add('start');
-        actionButton.innerHTML = '<span>🎤</span><span>Avvia Assistente</span>';
-        updateStatus('disconnected', 'Disconnesso');
-        instructions.style.display = 'block';
-        
-        stopTimer();
-      }
-    }
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
 
-    function handleWSMessage(msg) {
-      if (msg.type === 'suggestion.start') {
-        addSuggestion(msg.id, msg.category);
-      } else if (msg.type === 'suggestion.delta') {
-        updateSuggestion(msg.id, msg.textChunk);
-      } else if (msg.type === 'suggestion.end') {
-        finalizeSuggestion(msg.id);
-      }
-    }
+        button {
+            padding: 18px 30px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
 
-    function addSuggestion(id, category) {
-      const meta = CATEGORY_META[category] || { icon: "💡", label: "Smart Tip" };
-      
-      suggestions.unshift({ id, category, text: '', status: 'live' });
-      updateSuggestionCount();
-      renderSuggestions();
-    }
+        #startBtn {
+            background: var(--success);
+            color: white;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
 
-    function updateSuggestion(id, chunk) {
-      const suggestion = suggestions.find(s => s.id === id);
-      if (suggestion) {
-        suggestion.text += chunk;
-        renderSuggestions();
-      }
-    }
+        #startBtn:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
 
-    function finalizeSuggestion(id) {
-      const suggestion = suggestions.find(s => s.id === id);
-      if (suggestion) {
-        suggestion.status = 'done';
-        renderSuggestions();
-      }
-    }
+        #startBtn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
 
-    function renderSuggestions() {
-      if (suggestions.length === 0) {
-        suggestionsContainer.innerHTML = `
-          <div class="empty-state">
-            <div class="icon">💬</div>
-            <p>I suggerimenti AI appariranno qui in tempo reale<br>durante la tua chiamata</p>
-          </div>
-        `;
-        return;
-      }
+        #stopBtn {
+            background: var(--danger);
+            color: white;
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        }
 
-      suggestionsContainer.innerHTML = suggestions.map(s => {
-        const meta = CATEGORY_META[s.category] || { icon: "💡", label: "Smart Tip" };
-        return `
-          <div class="suggestion-card">
-            <div class="suggestion-header">
-              <div class="suggestion-category">
-                <span class="icon">${meta.icon}</span>
-                <span>${meta.label}</span>
-              </div>
-              <span class="suggestion-status ${s.status}">${s.status === 'live' ? 'live' : 'done'}</span>
+        #stopBtn:hover:not(:disabled) {
+            background: #dc2626;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+        }
+
+        #stopBtn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .section {
+            margin-bottom: 25px;
+        }
+
+        .section-title {
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+        }
+
+        .section-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .transcript-box, .suggestions-box {
+            background: var(--bg-main);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 180px;
+            max-height: 350px;
+            overflow-y: auto;
+        }
+
+        .transcript-box::-webkit-scrollbar,
+        .suggestions-box::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .transcript-box::-webkit-scrollbar-track,
+        .suggestions-box::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .transcript-box::-webkit-scrollbar-thumb,
+        .suggestions-box::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        .transcript-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            background: var(--bg-card);
+            border-radius: 10px;
+            border-left: 4px solid var(--primary);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .transcript-time {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .transcript-text {
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .suggestion-item {
+            padding: 18px;
+            margin-bottom: 12px;
+            background: var(--bg-card);
+            border-radius: 10px;
+            border-left: 4px solid var(--success);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            animation: slideIn 0.3s ease-out;
+            transition: all 0.3s;
+        }
+
+        .suggestion-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .suggestion-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .suggestion-category {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .suggestion-badge {
+            font-size: 10px;
+            padding: 3px 8px;
+            background: var(--success);
+            color: white;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .suggestion-text {
+            color: var(--text-primary);
+            line-height: 1.7;
+            font-size: 15px;
+        }
+
+        .empty-state {
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 50px 20px;
+            font-style: italic;
+            font-size: 14px;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.3;
+        }
+
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid var(--border);
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .footer a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: var(--bg-main);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border: 2px solid var(--border);
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 25px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .controls {
+                grid-template-columns: 1fr;
+            }
+
+            .stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🎯</div>
+            <div>
+                <h1>SalesGenius</h1>
+                <p class="subtitle">AI Sales Assistant - Test Audio in Tempo Reale</p>
             </div>
-            <div class="suggestion-text">${s.text || '<em>Generazione...</em>'}</div>
-          </div>
-        `;
-      }).join('');
-    }
+        </div>
 
-    function updateStatus(state, text) {
-      statusBar.className = `status-bar ${state}`;
-      statusDot.className = `status-dot ${state}`;
-      statusText.textContent = text;
-    }
+        <div class="warning">
+            <span class="warning-icon">⚠️</span>
+            <div class="warning-text">
+                <strong>Come usare l'applicazione:</strong>
+                1. Apri la tua chiamata (Google Meet, Zoom web, Teams web) in un'altra tab del browser<br>
+                2. Torna qui e clicca "▶️ Avvia Registrazione"<br>
+                3. Nel popup, seleziona la TAB della chiamata e ✅ spunta "Condividi audio della tab"<br>
+                4. Parla normalmente - vedrai trascrizioni e suggerimenti AI in tempo reale!<br>
+                <br>
+                <strong>Nota:</strong> Funziona solo con chiamate nel BROWSER (non app desktop Zoom/Teams)
+            </div>
+        </div>
 
-    function startTimer() {
-      timer = 0;
-      timerInterval = setInterval(() => {
-        timer++;
-        const minutes = Math.floor(timer / 60).toString().padStart(2, '0');
-        const seconds = (timer % 60).toString().padStart(2, '0');
-        timerDisplay.textContent = `${minutes}:${seconds}`;
-      }, 1000);
-    }
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">🔴 Non connesso al backend</span>
+        </div>
 
-    function stopTimer() {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-      timer = 0;
-      timerDisplay.textContent = '00:00';
-    }
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="transcriptCount">0</div>
+                <div class="stat-label">Trascrizioni</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="suggestionCount">0</div>
+                <div class="stat-label">Suggerimenti</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="duration">00:00</div>
+                <div class="stat-label">Durata</div>
+            </div>
+        </div>
 
-    function updateSuggestionCount() {
-      suggestionCount.textContent = `${suggestions.length} tips`;
-    }
+        <div class="controls">
+            <button id="startBtn">
+                <span>▶️</span>
+                <span>Avvia Registrazione</span>
+            </button>
+            <button id="stopBtn" disabled>
+                <span>⏹️</span>
+                <span>Ferma</span>
+            </button>
+        </div>
 
-    // Make functions global
-    window.toggleSharing = toggleSharing;
-    window.minimizeApp = () => window.blur();
-    window.closeApp = () => window.close();
+        <div class="section">
+            <div class="section-title">
+                <div class="section-icon">📝</div>
+                <span>Trascrizione Real-Time</span>
+            </div>
+            <div class="transcript-box" id="transcriptBox">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🎤</div>
+                    Premi "Avvia Registrazione" e inizia a parlare nella tua chiamata...
+                </div>
+            </div>
+        </div>
 
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').then(() => {
-        console.log('Service Worker registered');
-      });
-    }
-  </script>
+        <div class="section">
+            <div class="section-title">
+                <div class="section-icon">💡</div>
+                <span>Suggerimenti AI</span>
+            </div>
+            <div class="suggestions-box" id="suggestionsBox">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🤖</div>
+                    I suggerimenti AI appariranno qui automaticamente durante la conversazione...
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Backend: <a href="https://salesgenius-backend.onrender.com/health" target="_blank" rel="noopener">salesgenius-backend.onrender.com</a>
+            <br>
+            Powered by Deepgram + OpenAI
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // CONFIGURAZIONE
+        // ==========================================
+        const WS_URL = 'wss://salesgenius-backend.onrender.com';
+        
+        // ==========================================
+        // ELEMENTI DOM
+        // ==========================================
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const transcriptBox = document.getElementById('transcriptBox');
+        const suggestionsBox = document.getElementById('suggestionsBox');
+        const transcriptCount = document.getElementById('transcriptCount');
+        const suggestionCount = document.getElementById('suggestionCount');
+        const durationEl = document.getElementById('duration');
+
+        // ==========================================
+        // VARIABILI GLOBALI
+        // ==========================================
+        let ws = null;
+        let mediaRecorder = null;
+        let audioContext = null;
+        let isRecording = false;
+        let transcripts = 0;
+        let suggestions = 0;
+        let startTime = null;
+        let durationInterval = null;
+
+        // ==========================================
+        // WEBSOCKET MANAGEMENT
+        // ==========================================
+        function connectWebSocket() {
+            console.log('🔌 Connessione a:', WS_URL);
+            
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log('✅ WebSocket connesso');
+                console.log('📡 WebSocket readyState:', ws.readyState);
+                statusDot.classList.add('connected');
+                statusText.textContent = '🟢 Connesso al backend - Pronto!';
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('📨 Messaggio ricevuto:', data);
+
+                    if (data.type === 'transcript') {
+                        addTranscript(data.text);
+                    } else if (data.type === 'suggestion') {
+                        addSuggestion(data.text, data.category);
+                    } else if (data.type === 'suggestion.start') {
+                        console.log('💡 Nuovo suggerimento in arrivo...', data.category);
+                    } else if (data.type === 'suggestion.delta') {
+                        // Streaming del suggerimento (optional)
+                        console.log('📝 Chunk:', data.textChunk);
+                    } else if (data.type === 'suggestion.end') {
+                        console.log('✅ Suggerimento completato');
+                    } else if (data.type === 'error') {
+                        console.error('❌ Errore dal server:', data.message);
+                        alert('Errore: ' + data.message);
+                    }
+                } catch (err) {
+                    console.error('❌ Errore parsing messaggio:', err);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket errore:', error);
+                statusText.textContent = '🔴 Errore di connessione al backend';
+                statusDot.classList.remove('connected');
+            };
+
+            ws.onclose = () => {
+                console.log('🔌 WebSocket chiuso');
+                statusText.textContent = '🔴 Disconnesso dal backend';
+                statusDot.classList.remove('connected');
+            };
+        }
+
+        // ==========================================
+        // AUDIO RECORDING
+        // ==========================================
+        async function startRecording() {
+            try {
+                console.log('🎤 Richiedo cattura audio tab...');
+                
+                // Usa getDisplayMedia per catturare l'audio della TAB
+                // NOTA: Dobbiamo richiedere video=true (browser lo richiede), ma useremo solo l'audio
+                const stream = await navigator.mediaDevices.getDisplayMedia({ 
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    },
+                    video: true // Richiesto dal browser, ma useremo solo l'audio
+                });
+
+                // Ferma immediatamente il video (non ci serve)
+                const videoTracks = stream.getVideoTracks();
+                videoTracks.forEach(track => track.stop());
+
+                console.log('✅ Permessi ottenuti - audio tab catturato');
+
+                // Verifica che ci sia effettivamente un track audio
+                const audioTracks = stream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    throw new Error('Nessun audio catturato. Assicurati di spuntare "Condividi audio" quando selezioni la tab!');
+                }
+
+                console.log('✅ Audio track trovato:', audioTracks[0].label);
+
+                // Crea AudioContext per processare l'audio
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const source = audioContext.createMediaStreamSource(stream);
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                processor.onaudioprocess = (e) => {
+                    if (!isRecording) return;
+
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    const pcm16 = float32ToPCM16(inputData);
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(pcm16.buffer);
+                        // Log ogni 50 chunks per non sovraccaricare la console
+                        if (Math.random() < 0.02) {
+                            console.log('📤 Inviando audio chunk:', pcm16.length, 'bytes');
+                        }
+                    } else {
+                        console.warn('⚠️ WebSocket non pronto. readyState:', ws ? ws.readyState : 'null');
+                    }
+                };
+
+                // Gestisci la chiusura dello stream (quando l'utente ferma la condivisione)
+                stream.getAudioTracks()[0].onended = () => {
+                    console.log('⚠️ Condivisione audio terminata');
+                    stopRecording();
+                    alert('Condivisione audio terminata. Clicca di nuovo su "Avvia Registrazione" per riavviare.');
+                };
+
+                mediaRecorder = { stream, processor, source };
+                isRecording = true;
+
+                // Avvia timer durata
+                startTime = Date.now();
+                durationInterval = setInterval(updateDuration, 1000);
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                statusText.textContent = '🎙️ Registrazione in corso... (cattura audio tab)';
+
+                console.log('✅ Registrazione avviata - sto ascoltando l\'audio della tua chiamata!');
+
+            } catch (err) {
+                console.error('❌ Errore avvio registrazione:', err);
+                
+                let errorMsg = 'Errore cattura audio.';
+                
+                if (err.name === 'NotAllowedError') {
+                    errorMsg = 'Permesso negato. Riprova e seleziona la TAB della chiamata, poi spunta "Condividi audio".';
+                } else if (err.name === 'NotFoundError') {
+                    errorMsg = 'Nessuna tab trovata. Assicurati di avere una chiamata aperta in un\'altra tab del browser.';
+                } else if (err.message) {
+                    errorMsg = err.message;
+                }
+                
+                alert(errorMsg);
+            }
+        }
+
+        function stopRecording() {
+            console.log('⏹️ Fermo registrazione');
+            
+            isRecording = false;
+
+            if (mediaRecorder) {
+                if (mediaRecorder.stream) {
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
+                if (mediaRecorder.processor) {
+                    mediaRecorder.processor.disconnect();
+                }
+                if (mediaRecorder.source) {
+                    mediaRecorder.source.disconnect();
+                }
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            if (durationInterval) {
+                clearInterval(durationInterval);
+                durationInterval = null;
+            }
+
+            mediaRecorder = null;
+
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusText.textContent = '🟢 Connesso al backend - Pronto!';
+
+            console.log('✅ Registrazione fermata');
+        }
+
+        // ==========================================
+        // AUDIO PROCESSING
+        // ==========================================
+        function float32ToPCM16(float32Array) {
+            const pcm16 = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+                const s = Math.max(-1, Math.min(1, float32Array[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return pcm16;
+        }
+
+        // ==========================================
+        // UI UPDATES
+        // ==========================================
+        function addTranscript(text) {
+            if (transcriptBox.querySelector('.empty-state')) {
+                transcriptBox.innerHTML = '';
+            }
+
+            transcripts++;
+            transcriptCount.textContent = transcripts;
+
+            const item = document.createElement('div');
+            item.className = 'transcript-item';
+            
+            const time = new Date().toLocaleTimeString('it-IT');
+            
+            item.innerHTML = `
+                <div class="transcript-time">${time}</div>
+                <div class="transcript-text">${text}</div>
+            `;
+
+            transcriptBox.appendChild(item);
+            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+        }
+
+        function addSuggestion(text, category) {
+            if (suggestionsBox.querySelector('.empty-state')) {
+                suggestionsBox.innerHTML = '';
+            }
+
+            suggestions++;
+            suggestionCount.textContent = suggestions;
+
+            const item = document.createElement('div');
+            item.className = 'suggestion-item';
+            
+            const categoryLabels = {
+                'conversational': '🎧 Conversational',
+                'value': '💎 Value',
+                'closing': '✅ Closing',
+                'market': '🌐 Market'
+            };
+            
+            const categoryLabel = categoryLabels[category] || '💡 Suggerimento';
+            
+            item.innerHTML = `
+                <div class="suggestion-header">
+                    <div class="suggestion-category">${categoryLabel}</div>
+                    <div class="suggestion-badge">AI</div>
+                </div>
+                <div class="suggestion-text">${text}</div>
+            `;
+
+            suggestionsBox.insertBefore(item, suggestionsBox.firstChild);
+        }
+
+        function updateDuration() {
+            if (!startTime) return;
+            
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            
+            durationEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        // ==========================================
+        // EVENT LISTENERS
+        // ==========================================
+        startBtn.addEventListener('click', () => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                connectWebSocket();
+                setTimeout(startRecording, 1000); // Aspetta connessione
+            } else {
+                startRecording();
+            }
+        });
+
+        stopBtn.addEventListener('click', stopRecording);
+
+        // ==========================================
+        // PWA SERVICE WORKER
+        // ==========================================
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(registration => console.log('✅ Service Worker registrato:', registration.scope))
+                    .catch(err => console.log('❌ Service Worker registrazione fallita:', err));
+            });
+        }
+
+        // ==========================================
+        // INIT
+        // ==========================================
+        console.log('🚀 SalesGenius PWA caricata');
+        console.log('📡 Backend URL:', WS_URL);
+        
+        // Test connessione all'avvio
+        console.log('🔍 Verifico se il backend è online...');
+        fetch('https://salesgenius-backend.onrender.com/health')
+            .then(res => res.json())
+            .then(data => {
+                console.log('✅ Backend online:', data);
+                statusText.textContent = '🟢 Backend online - Pronto per iniziare!';
+            })
+            .catch(err => {
+                console.error('❌ Backend non raggiungibile:', err);
+                console.warn('⚠️ Il backend su Render potrebbe essere in sleep. Prova a cliccare START e aspetta 30-60 secondi.');
+                statusText.textContent = '🟡 Backend in sleep - Clicca START per svegliarlo';
+            });
+    </script>
 </body>
 </html>
