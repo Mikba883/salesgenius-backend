@@ -4,7 +4,9 @@ import express from "express";
 import cors from "cors";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import dotenv from "dotenv";
-import { generateSuggestion } from "./gpt-handler"; // 🔹 nuovo handler GPT
+import { generateSuggestion } from "./gpt-handler"; // handler GPT
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+
 dotenv.config();
 
 // ==========================================
@@ -12,7 +14,22 @@ dotenv.config();
 // ==========================================
 const PORT = parseInt(process.env.PORT || "8080", 10);
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY!;
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
+
 const deepgram = createClient(DEEPGRAM_API_KEY);
+const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+// Test connessione Supabase
+(async () => {
+  try {
+    const { error } = await supabase.from("sales_events").select("id").limit(1);
+    if (error) console.error("⚠️ Supabase test connection failed:", error.message);
+    else console.log("✅ Supabase connected successfully");
+  } catch (err) {
+    console.error("❌ Supabase connection error:", err);
+  }
+})();
 
 // ==========================================
 // EXPRESS
@@ -25,7 +42,7 @@ app.get("/health", (_, res) =>
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
-    version: "3.1.0",
+    version: "3.2.0",
   })
 );
 
@@ -36,7 +53,6 @@ const wss = new WebSocketServer({ server });
 // HELPER: Rimozione dati sensibili
 // ==========================================
 function sanitizeTranscript(text: string): string {
-  // 🔹 Rimuove email, numeri di telefono e codici numerici lunghi
   return text.replace(
     /(\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)|(\+\d{6,})|(\b\d{6,}\b)/gi,
     "[REDACTED]"
@@ -44,7 +60,7 @@ function sanitizeTranscript(text: string): string {
 }
 
 // ==========================================
-// GESTIONE CONNESSIONE
+// GESTIONE CONNESSIONE WS
 // ==========================================
 wss.on("connection", (ws: WebSocket) => {
   console.log("🔌 Nuovo client connesso");
@@ -55,7 +71,6 @@ wss.on("connection", (ws: WebSocket) => {
   let lastTranscriptTime = Date.now();
   let lastSuggestionTime = 0;
   let confidenceThreshold = 0.7;
-
   const FLUSH_INTERVAL_MS = 5000;
 
   // ==========================================
@@ -98,15 +113,15 @@ wss.on("connection", (ws: WebSocket) => {
       );
       lastTranscriptTime = Date.now();
 
-      // 🔹 Aggiorna soglia dinamica
+      // 🔹 Adattamento dinamico della soglia
       if (conf < confidenceThreshold - 0.2)
         confidenceThreshold = Math.max(0.5, confidenceThreshold - 0.05);
       if (conf > confidenceThreshold + 0.1)
         confidenceThreshold = Math.min(0.9, confidenceThreshold + 0.05);
 
-      // 🔹 Solo frasi finali e di qualità sufficiente
+      // 🔹 Solo frasi finali con conf > soglia
       if (isFinal && conf >= confidenceThreshold && text.split(" ").length > 4) {
-        const sanitizedText = sanitizeTranscript(text); // ✅ protezione PII
+        const sanitizedText = sanitizeTranscript(text);
         ws.send(JSON.stringify({ type: "transcript", text: sanitizedText, confidence: conf }));
 
         conversationHistory.push(sanitizedText);
@@ -122,9 +137,9 @@ wss.on("connection", (ws: WebSocket) => {
             transcript: sanitizedText,
             context,
             confidence: conf,
-            // se vuoi: orgId, userId, meetingId possono essere aggiunti qui
           });
 
+          // 🔹 Invia al client
           if (ws.readyState === 1) {
             ws.send(
               JSON.stringify({
@@ -133,6 +148,30 @@ wss.on("connection", (ws: WebSocket) => {
                 timestamp: new Date().toISOString(),
               })
             );
+          }
+
+          // 🔹 Salva evento in Supabase
+          try {
+            const { error } = await supabase.from("sales_events").insert([
+              {
+                transcript: sanitizedText,
+                confidence: conf,
+                language: "it",
+                intent: gpt.intent || null,
+                category: gpt.category || null,
+                suggestion: gpt.suggestion || null,
+                latency_ms: gpt.latency_ms || null,
+                tokens_used: gpt.tokens_used || null,
+                model: "gpt-4o-mini",
+                confidence_threshold: confidenceThreshold,
+              },
+            ]);
+
+            if (error)
+              console.error("❌ Errore inserimento Supabase:", error.message);
+            else console.log("✅ Evento salvato su Supabase");
+          } catch (err) {
+            console.error("❌ Supabase insert exception:", err);
           }
         }
       }
@@ -150,7 +189,7 @@ wss.on("connection", (ws: WebSocket) => {
     });
 
     // ==========================================
-    // FORZA FLUSH OGNI 5s
+    // FLUSH OGNI 5s
     // ==========================================
     setInterval(() => {
       if (deepgramLive && deepgramLive.getReadyState() === 1) {
@@ -199,3 +238,4 @@ wss.on("connection", (ws: WebSocket) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 SalesGenius Backend running on port ${PORT}`);
 });
+
