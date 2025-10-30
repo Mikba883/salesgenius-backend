@@ -1,9 +1,10 @@
 // ============================================================================
-// OPTIMIZED AI PROMPT SYSTEM - SalesGenius
+// OPTIMIZED AI PROMPT SYSTEM - SalesGenius v2
 // ============================================================================
 
 // SYSTEM PROMPT (Core Instructions)
-export const SYSTEM_PROMPT = `You are an expert B2B sales coach analyzing live sales calls in real-time.
+export const SYSTEM_PROMPT = `
+You are SalesGenius, an expert B2B sales coach analyzing live sales calls in real-time.
 
 LANGUAGE DETECTION:
 - Analyze the LATEST USER TEXT to detect the customer's language
@@ -14,7 +15,7 @@ LANGUAGE DETECTION:
 
 OUTPUT REQUIREMENTS:
 - Maximum 25 words (strict limit)
-- Be specific and actionable - suggest the NEXT best move
+- Be specific and actionable — suggest the NEXT best move
 - Use imperative verbs (Ask, Propose, Highlight, Quantify, etc.)
 - No generic motivation or filler phrases
 - No preambles like "You could..." or "Consider..."
@@ -34,7 +35,17 @@ WHAT TO DO INSTEAD:
 ✅ Reference PUBLICLY KNOWN market data/trends (when genuinely known)
 ✅ Suggest REASONING frameworks and objection-handling techniques
 
-If you cannot determine language from USER TEXT, default to English.`;
+STRUCTURED OUTPUT:
+Always respond in pure JSON, no markdown, like:
+{
+  "language": "en",
+  "intent": "objection | curiosity | negotiation | interest",
+  "category": "Discovery | Objection | Value | Closing",
+  "suggestion": "short actionable advice (max 25 words)"
+}
+
+If you cannot determine language from USER TEXT, default to English.
+`;
 
 // ============================================================================
 // CONFIGURATION PRESETS
@@ -44,10 +55,9 @@ export const QUALITY_PRESETS = {
   fast: {
     model: 'gpt-4o-mini' as const,
     temperature: 0.6,
-    max_tokens: 80,
+    max_tokens: 100,
     presence_penalty: 0.1,
   },
-  
   balanced: {
     model: 'gpt-4o-mini' as const,
     temperature: 0.7,
@@ -55,14 +65,13 @@ export const QUALITY_PRESETS = {
     presence_penalty: 0.2,
     frequency_penalty: 0.1,
   },
-  
   premium: {
     model: 'gpt-4o' as const,
     temperature: 0.8,
     max_tokens: 200,
     presence_penalty: 0.3,
     frequency_penalty: 0.2,
-  }
+  },
 };
 
 // ============================================================================
@@ -78,6 +87,7 @@ interface BuildMessagesParams {
   category?: string;
   transcript?: string;
   context?: string;
+  confidence?: number;
   conversationHistory?: Array<{ role: string; content: string }>;
 }
 
@@ -86,15 +96,17 @@ export function buildMessages(params: BuildMessagesParams): Message[] {
     category = "conversational",
     transcript = "",
     context = "",
-    conversationHistory = []
+    confidence = 0,
+    conversationHistory = [],
   } = params;
 
+  // Focus instructions per categoria
   const categoryInstructions = `
-Focus on ${category} techniques.
-Suggest strategic questions and approaches.
+Focus on ${category} techniques and objection-handling strategies.
 Never invent specific product data.
 `;
 
+  // Context dinamico (ultime 3 frasi o contesto accumulato)
   const recentContext = conversationHistory
     .slice(-3)
     .map(msg => `${msg.role}: ${msg.content}`)
@@ -102,6 +114,7 @@ Never invent specific product data.
 
   const contextSection = context || recentContext || "No prior context available";
 
+  // Prompt dell’utente finale
   const userPrompt = `
 CONVERSATION CONTEXT:
 ${contextSection}
@@ -109,21 +122,24 @@ ${contextSection}
 LATEST USER TEXT:
 "${transcript}"
 
+SYSTEM NOTES:
+- Confidence of transcription: ${confidence.toFixed(2)}
+- Respond only if text seems clear and meaningful.
+
 YOUR TASK:
-1. Detect language from the text above
-2. Generate ONE specific suggestion in that language
-3. Focus on ${category} category
-4. Maximum 25 words
-5. Use imperative form
-6. Don't repeat context
+1. Detect the language from the text above.
+2. Output structured JSON with: language, intent, category, suggestion.
+3. Maximum 25 words for suggestion.
+4. Use imperative tone, professional and concise.
+5. Don't repeat previous content.
 
 ${categoryInstructions}
 
-OUTPUT (suggestion only):`;
+OUTPUT (JSON only, no markdown):`;
 
   return [
-    { role: 'system' as const, content: SYSTEM_PROMPT },
-    { role: 'user' as const, content: userPrompt }
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: userPrompt },
   ];
 }
 
