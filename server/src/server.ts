@@ -12,6 +12,7 @@ dotenv.config();
 // ==========================================
 const PORT = parseInt(process.env.PORT || "8080", 10);
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY!;
+const deepgram = createClient(DEEPGRAM_API_KEY);
 
 // ==========================================
 // EXPRESS
@@ -24,7 +25,7 @@ app.get("/health", (_, res) =>
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
-    version: "3.0.0",
+    version: "3.1.0",
   })
 );
 
@@ -32,22 +33,29 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 // ==========================================
-// CLIENTS
+// HELPER: Rimozione dati sensibili
 // ==========================================
-const deepgram = createClient(DEEPGRAM_API_KEY);
+function sanitizeTranscript(text: string): string {
+  // 🔹 Rimuove email, numeri di telefono e codici numerici lunghi
+  return text.replace(
+    /(\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)|(\+\d{6,})|(\b\d{6,}\b)/gi,
+    "[REDACTED]"
+  );
+}
 
 // ==========================================
 // GESTIONE CONNESSIONE
 // ==========================================
 wss.on("connection", (ws: WebSocket) => {
   console.log("🔌 Nuovo client connesso");
+
   let deepgramLive: any = null;
   let conversationHistory: string[] = [];
   let audioChunksReceived = 0;
   let lastTranscriptTime = Date.now();
   let lastSuggestionTime = 0;
+  let confidenceThreshold = 0.7;
 
-  let confidenceThreshold = 0.7; // 🔹 soglia adattiva
   const FLUSH_INTERVAL_MS = 5000;
 
   // ==========================================
@@ -74,61 +82,61 @@ wss.on("connection", (ws: WebSocket) => {
     // ==========================================
     // EVENTO TRASCRIZIONE
     // ==========================================
-    deepgramLive.on(
-      LiveTranscriptionEvents.Transcript,
-      async (data: any) => {
-        const t = data.channel?.alternatives?.[0];
-        if (!t) return;
+    deepgramLive.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
+      const t = data.channel?.alternatives?.[0];
+      if (!t) return;
 
-        const text = t.transcript?.trim();
-        const isFinal = data.is_final;
-        const conf = t.confidence || 0;
-        if (!text) return;
+      const text = t.transcript?.trim();
+      const isFinal = data.is_final;
+      const conf = t.confidence || 0;
+      if (!text) return;
 
-        console.log(
-          `[DG] ${isFinal ? "FINAL" : "INTERIM"} (${conf.toFixed(
-            2
-          )}, thr=${confidenceThreshold.toFixed(2)}): "${text}"`
-        );
-        lastTranscriptTime = Date.now();
+      console.log(
+        `[DG] ${isFinal ? "FINAL" : "INTERIM"} (${conf.toFixed(
+          2
+        )}, thr=${confidenceThreshold.toFixed(2)}): "${text}"`
+      );
+      lastTranscriptTime = Date.now();
 
-        // 🔹 Aggiorna soglia dinamica
-        if (conf < confidenceThreshold - 0.2)
-          confidenceThreshold = Math.max(0.5, confidenceThreshold - 0.05);
-        if (conf > confidenceThreshold + 0.1)
-          confidenceThreshold = Math.min(0.9, confidenceThreshold + 0.05);
+      // 🔹 Aggiorna soglia dinamica
+      if (conf < confidenceThreshold - 0.2)
+        confidenceThreshold = Math.max(0.5, confidenceThreshold - 0.05);
+      if (conf > confidenceThreshold + 0.1)
+        confidenceThreshold = Math.min(0.9, confidenceThreshold + 0.05);
 
-        // 🔹 Solo frasi finali e con confidenza sufficiente
-        if (isFinal && conf >= confidenceThreshold && text.split(" ").length > 4) {
-          ws.send(JSON.stringify({ type: "transcript", text, confidence: conf }));
+      // 🔹 Solo frasi finali e di qualità sufficiente
+      if (isFinal && conf >= confidenceThreshold && text.split(" ").length > 4) {
+        const sanitizedText = sanitizeTranscript(text); // ✅ protezione PII
+        ws.send(JSON.stringify({ type: "transcript", text: sanitizedText, confidence: conf }));
 
-          conversationHistory.push(text);
-          if (conversationHistory.length > 15) conversationHistory.shift();
+        conversationHistory.push(sanitizedText);
+        if (conversationHistory.length > 15) conversationHistory.shift();
 
-          // 🔹 Debounce (evita spam GPT)
-          if (Date.now() - lastSuggestionTime > 500) {
-            lastSuggestionTime = Date.now();
-            const context = conversationHistory.slice(-7).join("\n");
+        // 🔹 Evita spam GPT
+        if (Date.now() - lastSuggestionTime > 500) {
+          lastSuggestionTime = Date.now();
+          const context = conversationHistory.slice(-7).join("\n");
 
-            console.log("🧠 Generando suggerimento strutturato...");
-            const gpt = await generateSuggestion({
-              transcript: text,
-              context,
-              confidence: conf,
-            });
+          console.log("🧠 Generando suggerimento strutturato...");
+          const gpt = await generateSuggestion({
+            transcript: sanitizedText,
+            context,
+            confidence: conf,
+            // se vuoi: orgId, userId, meetingId possono essere aggiunti qui
+          });
 
-            if (ws.readyState === 1)
-              ws.send(
-                JSON.stringify({
-                  type: "suggestion",
-                  ...gpt,
-                  timestamp: new Date().toISOString(),
-                })
-              );
+          if (ws.readyState === 1) {
+            ws.send(
+              JSON.stringify({
+                type: "suggestion",
+                ...gpt,
+                timestamp: new Date().toISOString(),
+              })
+            );
           }
         }
       }
-    );
+    });
 
     // ==========================================
     // ERRORI / CLOSE
@@ -148,9 +156,7 @@ wss.on("connection", (ws: WebSocket) => {
       if (deepgramLive && deepgramLive.getReadyState() === 1) {
         const idle = Date.now() - lastTranscriptTime;
         if (idle > FLUSH_INTERVAL_MS) {
-          console.log(
-            "🧹 Flush forzato (nessun transcript finale negli ultimi 5s)"
-          );
+          console.log("🧹 Flush forzato (idle > 5s)");
           deepgramLive.send(JSON.stringify({ type: "flush" }));
         }
       }
@@ -167,16 +173,18 @@ wss.on("connection", (ws: WebSocket) => {
       audioChunksReceived++;
       if (audioChunksReceived % 100 === 0)
         console.log(`📦 Ricevuti ${audioChunksReceived} chunk audio`);
+
       if (deepgramLive && deepgramLive.getReadyState() === 1) {
         deepgramLive.send(msg);
       } else {
-        console.warn(
-          `⚠️ Deepgram non pronto (state ${deepgramLive?.getReadyState()})`
-        );
+        console.warn(`⚠️ Deepgram non pronto (state ${deepgramLive?.getReadyState()})`);
       }
     }
   });
 
+  // ==========================================
+  // CHIUSURA
+  // ==========================================
   ws.on("close", () => {
     console.log("👋 Client disconnesso");
     if (deepgramLive) deepgramLive.finish();
@@ -191,5 +199,3 @@ wss.on("connection", (ws: WebSocket) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 SalesGenius Backend running on port ${PORT}`);
 });
-
-
