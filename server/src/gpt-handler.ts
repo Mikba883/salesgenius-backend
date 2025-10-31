@@ -1,4 +1,32 @@
-// server/src/gpt-handler.ts
+// ============================================================================
+// 🧠 SALES GENIUS v3.3 — GPT HANDLER MODULE
+// 🔍 Data-Informed Coach Edition | Real-Time Conversational Intelligence
+// ============================================================================
+//
+// File: server/src/gpt-handler.ts
+// Author: Michele Baroni
+// Project: SalesGenius (AI Overlay for Live Sales Coaching)
+//
+// 🎯 Purpose:
+//   Core module that connects WebSocket streaming, OpenAI GPT reasoning,
+//   and Supabase logging to generate intelligent, phase-aware sales suggestions
+//   in real time based on Intent × Category analysis.
+//
+// ⚙️ Functions:
+//   • handleGPTSuggestion() — builds messages, calls GPT, streams structured JSON
+//   • getHistoricalSuggestions() — retrieves past AI suggestions from Supabase
+//   • analyzeSuggestionPerformance() — computes user-level performance metrics
+//
+// 🧩 Stack:
+//   - OpenAI GPT-4o / GPT-4o-mini
+//   - Supabase Database & Auth
+//   - Node.js + ws (WebSocket)
+//   - JSON-structured output aligned to system prompt logic
+//
+// 🔖 Version: 3.3
+// 🗓️ Last Updated: 2025-10-31
+// ============================================================================
+
 import OpenAI from 'openai';
 import { WebSocket } from 'ws';
 import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/supabase-js';
@@ -15,49 +43,74 @@ const supabase: SupabaseClient = createSupabaseClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-// Categorie di suggerimenti
-type SuggestionCategory = 'conversational' | 'value' | 'closing' | 'market';
+// ============================================================================
+// 🎯 CATEGORY SYSTEM (macro) — allineato a SalesGenius v3.3
+// ============================================================================
+//
+// 1. rapport      → Rapport & Opening
+// 2. discovery    → Discovery & Qualification
+// 3. value        → Value Discussion
+// 4. objection    → Objection & Negotiation
+// 5. closing      → Closing & Follow-Up
+//
+type SuggestionCategory = 'rapport' | 'discovery' | 'value' | 'objection' | 'closing';
 
-// Mappa emoji per categorie
+// Emoji mapping per overlay visivo
 const CATEGORY_EMOJI: Record<SuggestionCategory, string> = {
-  conversational: '🎧',
+  rapport: '🤝',
+  discovery: '🧭',
   value: '💎',
+  objection: '⚖️',
   closing: '✅',
-  market: '🌐'
 };
 
-// Cache per evitare suggerimenti duplicati
+// ============================================================================
+// 🧩 INTENT SYSTEM (micro) — allineato al framework SalesGenius
+// ============================================================================
+//
+// 1. explore       → Customer asks a question or seeks clarification
+// 2. express_need  → States a goal, problem, or pain point
+// 3. show_interest → Displays curiosity or alignment
+// 4. raise_objection→ Expresses doubt or disagreement
+// 5. decide        → Indicates readiness or decision
+//
+type SuggestionIntent =
+  | 'explore'
+  | 'express_need'
+  | 'show_interest'
+  | 'raise_objection'
+  | 'decide';
+
+// ============================================================================
+// ⚙️ SYSTEM STATE & CACHE
+// ============================================================================
 const recentSuggestions = new Set<string>();
 const CACHE_DURATION_MS = 30000; // 30 secondi
-
-// Buffer per la cronologia della conversazione
-const conversationHistory: Array<{ role: 'user' | 'assistant', content: string }> = [];
+const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 const MAX_HISTORY = 5;
 
-/**
- * Gestisce la generazione di suggerimenti con GPT usando il sistema di prompt
- */
+// ============================================================================
+// 🧠 handleGPTSuggestion()
+// Core: genera suggerimento e lo streamma in tempo reale via WebSocket
+// ============================================================================
 export async function handleGPTSuggestion(
   transcript: string,
   ws: WebSocket,
   onSuggestionGenerated?: (category: string, suggestion: string) => Promise<void>
 ): Promise<void> {
   try {
-    // Prepara i messaggi usando il sistema di prompt
     const messages = buildMessages({
       transcript,
       confidence: 0.8,
-      conversationHistory: conversationHistory,
+      conversationHistory,
     });
 
-    // Ottieni la configurazione di qualità
     const qualityMode = process.env.QUALITY_MODE || 'balanced';
-    const qualitySettings = QUALITY_PRESETS[qualityMode as keyof typeof QUALITY_PRESETS] || QUALITY_PRESETS.balanced;
+    const qualitySettings =
+      QUALITY_PRESETS[qualityMode as keyof typeof QUALITY_PRESETS] || QUALITY_PRESETS.balanced;
 
-    // ID unico per questo suggerimento
     const suggestionId = `s-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Chiama OpenAI
     const completion = await openai.chat.completions.create({
       model: qualitySettings.model,
       messages: messages as any,
@@ -65,11 +118,10 @@ export async function handleGPTSuggestion(
       max_tokens: qualitySettings.max_tokens,
       presence_penalty: qualitySettings.presence_penalty,
       frequency_penalty: qualitySettings.frequency_penalty,
-      response_format: { type: "json_object" },
+      response_format: { type: 'json_object' },
     });
 
     const responseText = completion.choices[0]?.message?.content || '{}';
-    
     let parsedResponse;
     try {
       parsedResponse = JSON.parse(responseText);
@@ -78,95 +130,76 @@ export async function handleGPTSuggestion(
       throw new Error('Invalid response format from GPT');
     }
 
-    // Estrai i dati dalla risposta
-    const category = parsedResponse.category || 'conversational';
+    // Estratti principali
+    const category: SuggestionCategory = parsedResponse.category?.toLowerCase() || 'discovery';
     const suggestion = parsedResponse.suggestion || '';
-    const intent = parsedResponse.intent || '';
-    const language = parsedResponse.language || 'it';
+    const intent: SuggestionIntent = parsedResponse.intent?.toLowerCase() || 'explore';
+    const language = parsedResponse.language || 'en';
 
-    // Verifica che il suggerimento non sia vuoto
-    if (!suggestion || suggestion.trim().length === 0) {
+    if (!suggestion.trim()) {
       console.log('Empty suggestion received, skipping');
       return;
     }
 
-    // Controlla duplicati
     const suggestionKey = `${category}:${suggestion.substring(0, 30)}`;
     if (recentSuggestions.has(suggestionKey)) {
       console.log('Duplicate suggestion, skipping');
       return;
     }
 
-    // Aggiungi alla cache
     recentSuggestions.add(suggestionKey);
     setTimeout(() => recentSuggestions.delete(suggestionKey), CACHE_DURATION_MS);
 
-    // Aggiungi alla cronologia
+    // aggiorna cronologia
     conversationHistory.push({ role: 'user', content: transcript });
     conversationHistory.push({ role: 'assistant', content: suggestion });
-    if (conversationHistory.length > MAX_HISTORY * 2) {
-      conversationHistory.splice(0, 2);
-    }
+    if (conversationHistory.length > MAX_HISTORY * 2) conversationHistory.splice(0, 2);
 
-    // Invia al client con streaming simulato
-    const emoji = CATEGORY_EMOJI[category as SuggestionCategory] || '💡';
-    
-    // Invia inizio
+    // invia suggerimento al client via WebSocket (stream simulato)
+    const emoji = CATEGORY_EMOJI[category] || '💡';
+
     ws.send(JSON.stringify({
       type: 'suggestion.start',
       id: suggestionId,
       category,
       intent,
       language,
-      emoji
+      emoji,
     }));
 
-    // Simula streaming del testo (dividi in chunks)
     const words = suggestion.split(' ');
-    let currentText = '';
-    
     for (let i = 0; i < words.length; i++) {
-      currentText += (i > 0 ? ' ' : '') + words[i];
-      
       ws.send(JSON.stringify({
         type: 'suggestion.delta',
         id: suggestionId,
-        textChunk: (i > 0 ? ' ' : '') + words[i]
+        textChunk: (i > 0 ? ' ' : '') + words[i],
       }));
-      
-      // Piccolo delay per simulare streaming
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(r => setTimeout(r, 50));
     }
 
-    // Invia fine
     ws.send(JSON.stringify({
       type: 'suggestion.end',
       id: suggestionId,
       fullText: suggestion,
       category,
-      intent
+      intent,
     }));
 
     console.log(`🤖 [${category}/${intent}] ${language}: ${suggestion}`);
 
-    // Callback per salvare nel database
-    if (onSuggestionGenerated) {
-      await onSuggestionGenerated(category, suggestion);
-    }
-
+    if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
   } catch (error) {
     console.error('Error generating GPT suggestion:', error);
-    
     ws.send(JSON.stringify({
       type: 'error',
-      message: 'Errore nella generazione del suggerimento'
+      message: 'Errore nella generazione del suggerimento',
     }));
   }
 }
 
-/**
- * Recupera suggerimenti storici per migliorare le raccomandazioni
- */
+// ============================================================================
+// 📜 getHistoricalSuggestions()
+// ============================================================================
 export async function getHistoricalSuggestions(
   userId: string,
   sessionId?: string,
@@ -179,18 +212,12 @@ export async function getHistoricalSuggestions(
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(limit);
-
-    if (sessionId) {
-      query = query.eq('session_id', sessionId);
-    }
-
+    if (sessionId) query = query.eq('session_id', sessionId);
     const { data, error } = await query;
-
     if (error) {
       console.error('Error fetching historical suggestions:', error);
       return [];
     }
-
     return data || [];
   } catch (error) {
     console.error('Error in getHistoricalSuggestions:', error);
@@ -198,50 +225,34 @@ export async function getHistoricalSuggestions(
   }
 }
 
-/**
- * Analizza le performance dei suggerimenti
- */
+// ============================================================================
+// 📊 analyzeSuggestionPerformance()
+// ============================================================================
 export async function analyzeSuggestionPerformance(userId: string): Promise<any> {
   try {
-    // Recupera tutti i suggerimenti dell'utente
     const { data, error } = await supabase
       .from('sales_events')
       .select('category, confidence, feedback')
       .eq('user_id', userId);
+    if (error || !data) return null;
 
-    if (error || !data) {
-      return null;
-    }
-
-    // Calcola statistiche per categoria
     const stats: any = {
       total: data.length,
       byCategory: {},
       averageConfidence: 0,
-      withPositiveFeedback: 0
+      withPositiveFeedback: 0,
     };
-
     let totalConfidence = 0;
 
     for (const event of data) {
-      // Conta per categoria
-      if (!stats.byCategory[event.category]) {
-        stats.byCategory[event.category] = 0;
-      }
+      if (!stats.byCategory[event.category]) stats.byCategory[event.category] = 0;
       stats.byCategory[event.category]++;
-
-      // Somma confidence
       totalConfidence += event.confidence || 0;
-
-      // Conta feedback positivi
-      if (event.feedback === true) {
-        stats.withPositiveFeedback++;
-      }
+      if (event.feedback === true) stats.withPositiveFeedback++;
     }
 
     stats.averageConfidence = data.length > 0 ? totalConfidence / data.length : 0;
     stats.feedbackRate = data.length > 0 ? stats.withPositiveFeedback / data.length : 0;
-
     return stats;
   } catch (error) {
     console.error('Error analyzing performance:', error);
@@ -252,6 +263,6 @@ export async function analyzeSuggestionPerformance(userId: string): Promise<any>
 export default {
   handleGPTSuggestion,
   getHistoricalSuggestions,
-  analyzeSuggestionPerformance
+  analyzeSuggestionPerformance,
 };
 
