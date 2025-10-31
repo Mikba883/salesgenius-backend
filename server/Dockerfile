@@ -1,38 +1,50 @@
+# server/Dockerfile
 # ===============================
-# Backend Dockerfile - SalesGenius
+# 🎯 Stage 1: Build
 # ===============================
-
 FROM node:20-alpine AS builder
+
 WORKDIR /app
 
-# 1️⃣ Installa tutte le dipendenze
+# Copia package files
 COPY package*.json ./
-RUN npm install
 
-# 2️⃣ Copia tutto il codice sorgente
+# Installa TUTTE le dipendenze (incluse devDependencies per TypeScript)
+RUN npm ci
+
+# Copia tutto il codice sorgente
 COPY . .
 
-# 3️⃣ Compila TypeScript
+# Compila TypeScript
 RUN npx tsc
 
 # ===============================
-# Production Image
+# 🚀 Stage 2: Production
 # ===============================
 FROM node:20-alpine
+
 WORKDIR /app
 
-# Copia solo i file necessari dal builder
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
+# Copia package files
+COPY package*.json ./
 
-# 4️⃣ Esponi la porta
+# Installa solo dipendenze di produzione
+RUN npm ci --only=production
+
+# Copia i file compilati dal builder
+COPY --from=builder /app/dist ./dist
+
+# Copia eventuali file statici necessari (se esistono)
+COPY --from=builder /app/.env* ./ 2>/dev/null || true
+
+# Esponi la porta (Render la configura automaticamente)
 EXPOSE 8080
 
-# 5️⃣ Health Check automatico
+# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8080/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+  CMD node -e "require('http').get('http://localhost:8080/health', (r) => {r.statusCode === 200 ? process.exit(0) : process.exit(1)})"
 
-# 6️⃣ Avvia il server compilato
+# Comando di avvio
 CMD ["node", "dist/server.js"]
+
 
