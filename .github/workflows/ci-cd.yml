@@ -19,7 +19,7 @@ jobs:
       with:
         node-version: '20'
         cache: 'npm'
-        cache-dependency-path: package-lock.json
+        cache-dependency-path: '**/package-lock.json'
     
     - name: Install dependencies
       run: npm ci
@@ -74,6 +74,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    # Vercel deployment happens automatically via GitHub integration
     - name: Notify Vercel
       run: echo "Vercel will auto-deploy on push to main"
-
