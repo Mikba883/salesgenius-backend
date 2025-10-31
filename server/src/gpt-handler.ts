@@ -46,16 +46,8 @@ const supabase: SupabaseClient = createSupabaseClient(
 // ============================================================================
 // 🎯 CATEGORY SYSTEM (macro) — allineato a SalesGenius v3.3
 // ============================================================================
-//
-// 1. rapport      → Rapport & Opening
-// 2. discovery    → Discovery & Qualification
-// 3. value        → Value Discussion
-// 4. objection    → Objection & Negotiation
-// 5. closing      → Closing & Follow-Up
-//
 type SuggestionCategory = 'rapport' | 'discovery' | 'value' | 'objection' | 'closing';
 
-// Emoji mapping per overlay visivo
 const CATEGORY_EMOJI: Record<SuggestionCategory, string> = {
   rapport: '🤝',
   discovery: '🧭',
@@ -65,15 +57,8 @@ const CATEGORY_EMOJI: Record<SuggestionCategory, string> = {
 };
 
 // ============================================================================
-// 🧩 INTENT SYSTEM (micro) — allineato al framework SalesGenius
+// 🧩 INTENT SYSTEM (micro)
 // ============================================================================
-//
-// 1. explore       → Customer asks a question or seeks clarification
-// 2. express_need  → States a goal, problem, or pain point
-// 3. show_interest → Displays curiosity or alignment
-// 4. raise_objection→ Expresses doubt or disagreement
-// 5. decide        → Indicates readiness or decision
-//
 type SuggestionIntent =
   | 'explore'
   | 'express_need'
@@ -85,13 +70,12 @@ type SuggestionIntent =
 // ⚙️ SYSTEM STATE & CACHE
 // ============================================================================
 const recentSuggestions = new Set<string>();
-const CACHE_DURATION_MS = 30000; // 30 secondi
+const CACHE_DURATION_MS = 30000; // 30 sec
 const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 const MAX_HISTORY = 5;
 
 // ============================================================================
 // 🧠 handleGPTSuggestion()
-// Core: genera suggerimento e lo streamma in tempo reale via WebSocket
 // ============================================================================
 export async function handleGPTSuggestion(
   transcript: string,
@@ -111,13 +95,15 @@ export async function handleGPTSuggestion(
 
     const suggestionId = `s-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // ✅ CORRETTA CHIAMATA GPT (compatibile TypeScript)
     const completion = await openai.chat.completions.create({
       model: qualitySettings.model,
       messages: messages as any,
       temperature: qualitySettings.temperature,
       max_tokens: qualitySettings.max_tokens,
       presence_penalty: qualitySettings.presence_penalty,
-      frequency_penalty: qualitySettings.frequency_penalty,
+      // @ts-ignore: some models may not accept this field, safe to include for legacy tuning
+      frequency_penalty: (qualitySettings as any).frequency_penalty ?? 0,
       response_format: { type: 'json_object' },
     });
 
@@ -150,50 +136,59 @@ export async function handleGPTSuggestion(
     recentSuggestions.add(suggestionKey);
     setTimeout(() => recentSuggestions.delete(suggestionKey), CACHE_DURATION_MS);
 
-    // aggiorna cronologia
     conversationHistory.push({ role: 'user', content: transcript });
     conversationHistory.push({ role: 'assistant', content: suggestion });
     if (conversationHistory.length > MAX_HISTORY * 2) conversationHistory.splice(0, 2);
 
-    // invia suggerimento al client via WebSocket (stream simulato)
     const emoji = CATEGORY_EMOJI[category] || '💡';
 
-    ws.send(JSON.stringify({
-      type: 'suggestion.start',
-      id: suggestionId,
-      category,
-      intent,
-      language,
-      emoji,
-    }));
+    // 🟢 Invia inizio
+    ws.send(
+      JSON.stringify({
+        type: 'suggestion.start',
+        id: suggestionId,
+        category,
+        intent,
+        language,
+        emoji,
+      })
+    );
 
+    // 🟢 Stream simulato
     const words = suggestion.split(' ');
     for (let i = 0; i < words.length; i++) {
-      ws.send(JSON.stringify({
-        type: 'suggestion.delta',
-        id: suggestionId,
-        textChunk: (i > 0 ? ' ' : '') + words[i],
-      }));
-      await new Promise(r => setTimeout(r, 50));
+      ws.send(
+        JSON.stringify({
+          type: 'suggestion.delta',
+          id: suggestionId,
+          textChunk: (i > 0 ? ' ' : '') + words[i],
+        })
+      );
+      await new Promise((r) => setTimeout(r, 50));
     }
 
-    ws.send(JSON.stringify({
-      type: 'suggestion.end',
-      id: suggestionId,
-      fullText: suggestion,
-      category,
-      intent,
-    }));
+    // 🟢 Fine
+    ws.send(
+      JSON.stringify({
+        type: 'suggestion.end',
+        id: suggestionId,
+        fullText: suggestion,
+        category,
+        intent,
+      })
+    );
 
     console.log(`🤖 [${category}/${intent}] ${language}: ${suggestion}`);
 
     if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
   } catch (error) {
     console.error('Error generating GPT suggestion:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'Errore nella generazione del suggerimento',
-    }));
+    ws.send(
+      JSON.stringify({
+        type: 'error',
+        message: 'Errore nella generazione del suggerimento',
+      })
+    );
   }
 }
 
