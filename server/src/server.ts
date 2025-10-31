@@ -1,241 +1,366 @@
-import { WebSocketServer, WebSocket } from "ws";
-import { createServer } from "http";
-import express from "express";
-import cors from "cors";
-import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import dotenv from "dotenv";
-import { generateSuggestion } from "./gpt-handler"; // handler GPT
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+// server/src/server.ts
+import express from 'express';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createClient, DeepgramClient, LiveTranscriptionEvents } from '@deepgram/sdk';
+import { config } from 'dotenv';
+import { handleGPTSuggestion } from './gpt-handler';
+import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/supabase-js';
 
-dotenv.config();
+// Carica le variabili d'ambiente
+config();
 
-// ==========================================
-// CONFIGURAZIONE
-// ==========================================
-const PORT = parseInt(process.env.PORT || "8080", 10);
-const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY!;
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
-
-const deepgram = createClient(DEEPGRAM_API_KEY);
-const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-// Test connessione Supabase
-(async () => {
-  try {
-    const { error } = await supabase.from("sales_events").select("id").limit(1);
-    if (error) console.error("⚠️ Supabase test connection failed:", error.message);
-    else console.log("✅ Supabase connected successfully");
-  } catch (err) {
-    console.error("❌ Supabase connection error:", err);
-  }
-})();
-
-// ==========================================
-// EXPRESS
-// ==========================================
-const app = express();
-app.use(cors({ origin: "*", credentials: true }));
-app.use(express.json());
-
-app.get("/health", (_, res) =>
-  res.json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    version: "3.2.0",
-  })
+// Inizializza Supabase
+const supabase: SupabaseClient = createSupabaseClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY! // Usa SERVICE_KEY per operazioni server-side
 );
 
-const server = createServer(app);
-const wss = new WebSocketServer({ server });
-
-// ==========================================
-// HELPER: Rimozione dati sensibili
-// ==========================================
-function sanitizeTranscript(text: string): string {
-  return text.replace(
-    /(\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)|(\+\d{6,})|(\b\d{6,}\b)/gi,
-    "[REDACTED]"
-  );
+// Tipo per la sessione utente
+interface UserSession {
+  userId: string;
+  isPremium: boolean;
+  sessionId: string;
+  startTime: Date;
+  ws: WebSocket;
 }
 
-// ==========================================
-// GESTIONE CONNESSIONE WS
-// ==========================================
-wss.on("connection", (ws: WebSocket) => {
-  console.log("🔌 Nuovo client connesso");
+// Cache delle sessioni attive
+const activeSessions = new Map<WebSocket, UserSession>();
 
-  let deepgramLive: any = null;
-  let conversationHistory: string[] = [];
-  let audioChunksReceived = 0;
-  let lastTranscriptTime = Date.now();
-  let lastSuggestionTime = 0;
-  let confidenceThreshold = 0.7;
-  const FLUSH_INTERVAL_MS = 5000;
+// Inizializza Deepgram
+const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY!);
 
-  // ==========================================
-  // AVVIO DEEPGRAM
-  // ==========================================
+// Setup Express
+const app = express();
+const PORT = process.env.PORT || 8080;
+
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    service: 'salesgenius-backend',
+    timestamp: new Date().toISOString()
+  });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`🚀 SalesGenius Backend running on port ${PORT}`);
+  console.log(`✅ Supabase connected to: ${process.env.SUPABASE_URL}`);
+});
+
+// Setup WebSocket Server
+const wss = new WebSocketServer({ 
+  server,
+  path: '/stream-audio'
+});
+
+/**
+ * Verifica l'autenticazione dell'utente
+ */
+async function authenticateUser(authToken: string): Promise<{ userId: string; isPremium: boolean } | null> {
   try {
-    deepgramLive = deepgram.listen.live({
-      model: "nova-2",
-      language: "it",
-      smart_format: true,
-      interim_results: true,
-      vad_events: true,
-      encoding: "linear16",
-      sample_rate: 16000,
-      channels: 1,
-    });
+    // Decodifica e verifica il JWT token
+    const { data: { user }, error } = await supabase.auth.getUser(authToken);
+    
+    if (error || !user) {
+      console.error('Auth error:', error);
+      return null;
+    }
 
-    console.log("🎙️ Deepgram configurato (16kHz, mono)");
+    // Verifica se l'utente è premium (dalla tabella user_profiles)
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
 
-    deepgramLive.on(LiveTranscriptionEvents.Open, () => {
-      console.log("✅ Deepgram connesso");
-    });
+    if (profileError) {
+      console.error('Profile error:', profileError);
+      // Se non c'è profilo, assumiamo non sia premium
+      return { userId: user.id, isPremium: false };
+    }
 
-    // ==========================================
-    // EVENTO TRASCRIZIONE
-    // ==========================================
-    deepgramLive.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
-      const t = data.channel?.alternatives?.[0];
-      if (!t) return;
+    // Il campo 'used' = true significa che l'utente è premium
+    const isPremium = profile?.used === true;
+    
+    console.log(`✅ User authenticated: ${user.id}, Premium: ${isPremium}`);
+    return { userId: user.id, isPremium };
+  } catch (error) {
+    console.error('Authentication error:', error);
+    return null;
+  }
+}
 
-      const text = t.transcript?.trim();
-      const isFinal = data.is_final;
-      const conf = t.confidence || 0;
-      if (!text) return;
-
-      console.log(
-        `[DG] ${isFinal ? "FINAL" : "INTERIM"} (${conf.toFixed(
-          2
-        )}, thr=${confidenceThreshold.toFixed(2)}): "${text}"`
-      );
-      lastTranscriptTime = Date.now();
-
-      // 🔹 Adattamento dinamico della soglia
-      if (conf < confidenceThreshold - 0.2)
-        confidenceThreshold = Math.max(0.5, confidenceThreshold - 0.05);
-      if (conf > confidenceThreshold + 0.1)
-        confidenceThreshold = Math.min(0.9, confidenceThreshold + 0.05);
-
-      // 🔹 Solo frasi finali con conf > soglia
-      if (isFinal && conf >= confidenceThreshold && text.split(" ").length > 4) {
-        const sanitizedText = sanitizeTranscript(text);
-        ws.send(JSON.stringify({ type: "transcript", text: sanitizedText, confidence: conf }));
-
-        conversationHistory.push(sanitizedText);
-        if (conversationHistory.length > 15) conversationHistory.shift();
-
-        // 🔹 Evita spam GPT
-        if (Date.now() - lastSuggestionTime > 500) {
-          lastSuggestionTime = Date.now();
-          const context = conversationHistory.slice(-7).join("\n");
-
-          console.log("🧠 Generando suggerimento strutturato...");
-          const gpt = await generateSuggestion({
-            transcript: sanitizedText,
-            context,
-            confidence: conf,
-          });
-
-          // 🔹 Invia al client
-          if (ws.readyState === 1) {
-            ws.send(
-              JSON.stringify({
-                type: "suggestion",
-                ...gpt,
-                timestamp: new Date().toISOString(),
-              })
-            );
-          }
-
-          // 🔹 Salva evento in Supabase
-          try {
-            const { error } = await supabase.from("sales_events").insert([
-              {
-                transcript: sanitizedText,
-                confidence: conf,
-                language: "it",
-                intent: gpt.intent || null,
-                category: gpt.category || null,
-                suggestion: gpt.suggestion || null,
-                latency_ms: gpt.latency_ms || null,
-                tokens_used: gpt.tokens_used || null,
-                model: "gpt-4o-mini",
-                confidence_threshold: confidenceThreshold,
-              },
-            ]);
-
-            if (error)
-              console.error("❌ Errore inserimento Supabase:", error.message);
-            else console.log("✅ Evento salvato su Supabase");
-          } catch (err) {
-            console.error("❌ Supabase insert exception:", err);
-          }
+/**
+ * Salva un suggerimento nella tabella sales_events
+ */
+async function saveSuggestion(
+  session: UserSession,
+  category: string,
+  suggestion: string,
+  transcriptContext: string,
+  confidence: number
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('sales_events')
+      .insert({
+        id: crypto.randomUUID(),
+        user_id: session.userId,
+        session_id: session.sessionId,
+        category,
+        suggestion,
+        transcript_context: transcriptContext,
+        confidence,
+        created_at: new Date().toISOString(),
+        metadata: {
+          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+          processing_time_ms: Date.now() - session.startTime.getTime()
         }
-      }
-    });
+      });
 
-    // ==========================================
-    // ERRORI / CLOSE
-    // ==========================================
-    deepgramLive.on(LiveTranscriptionEvents.Error, (e: any) => {
-      console.error("❌ Deepgram error:", e);
-    });
+    if (error) {
+      console.error('Error saving suggestion:', error);
+    } else {
+      console.log(`💾 Suggestion saved: [${category}] ${suggestion.substring(0, 50)}...`);
+    }
+  } catch (error) {
+    console.error('Unexpected error saving suggestion:', error);
+  }
+}
 
-    deepgramLive.on(LiveTranscriptionEvents.Close, (ev: any) => {
-      console.log("🔌 Deepgram disconnesso:", ev.reason || ev.code);
-    });
+// WebSocket connection handler
+wss.on('connection', async (ws: WebSocket, req: any) => {
+  console.log('🔌 New WebSocket connection attempt');
 
-    // ==========================================
-    // FLUSH OGNI 5s
-    // ==========================================
-    setInterval(() => {
-      if (deepgramLive && deepgramLive.getReadyState() === 1) {
-        const idle = Date.now() - lastTranscriptTime;
-        if (idle > FLUSH_INTERVAL_MS) {
-          console.log("🧹 Flush forzato (idle > 5s)");
-          deepgramLive.send(JSON.stringify({ type: "flush" }));
-        }
-      }
-    }, FLUSH_INTERVAL_MS);
-  } catch (e) {
-    console.error("❌ Errore inizializzazione Deepgram:", e);
+  // Estrai il token dall'header Authorization o dalla query string
+  const authHeader = req.headers['authorization'];
+  const urlParams = new URLSearchParams(req.url?.split('?')[1] || '');
+  const token = authHeader?.replace('Bearer ', '') || urlParams.get('token');
+
+  // Se non c'è token, permetti comunque la connessione (modalità demo)
+  // In produzione, potresti voler rifiutare la connessione
+  if (!token) {
+    console.log('⚠️ No auth token provided - running in demo mode');
+    // Crea una sessione demo
+    const demoSession: UserSession = {
+      userId: 'demo-user',
+      isPremium: false,
+      sessionId: `demo_${Date.now()}`,
+      startTime: new Date(),
+      ws
+    };
+    activeSessions.set(ws, demoSession);
+  } else {
+    // Autentica l'utente
+    const authResult = await authenticateUser(token);
+    
+    if (!authResult) {
+      console.error('❌ Authentication failed');
+      ws.send(JSON.stringify({ 
+        type: 'error', 
+        message: 'Authentication failed. Please login again.' 
+      }));
+      ws.close(1008, 'Authentication failed');
+      return;
+    }
+
+    if (!authResult.isPremium) {
+      console.log('⚠️ User is not premium');
+      ws.send(JSON.stringify({ 
+        type: 'error', 
+        message: 'Premium subscription required for SalesGenius' 
+      }));
+      ws.close(1008, 'Premium required');
+      return;
+    }
+
+    // Crea la sessione autenticata
+    const session: UserSession = {
+      userId: authResult.userId,
+      isPremium: authResult.isPremium,
+      sessionId: `session_${Date.now()}_${authResult.userId.substring(0, 8)}`,
+      startTime: new Date(),
+      ws
+    };
+    
+    activeSessions.set(ws, session);
+    
+    // Invia conferma al client
+    ws.send(JSON.stringify({
+      type: 'auth_success',
+      sessionId: session.sessionId,
+      isPremium: session.isPremium
+    }));
   }
 
-  // ==========================================
-  // RICEZIONE AUDIO
-  // ==========================================
-  ws.on("message", (msg: Buffer) => {
-    if (msg instanceof Buffer) {
-      audioChunksReceived++;
-      if (audioChunksReceived % 100 === 0)
-        console.log(`📦 Ricevuti ${audioChunksReceived} chunk audio`);
+  let deepgramConnection: any = null;
+  let transcriptBuffer = '';
+  let lastSuggestionTime = 0;
+  const SUGGESTION_DEBOUNCE_MS = 3000; // Almeno 3 secondi tra suggerimenti
 
-      if (deepgramLive && deepgramLive.getReadyState() === 1) {
-        deepgramLive.send(msg);
-      } else {
-        console.warn(`⚠️ Deepgram non pronto (state ${deepgramLive?.getReadyState()})`);
+  ws.on('message', async (message: Buffer) => {
+    const session = activeSessions.get(ws);
+    if (!session) return;
+
+    try {
+      // Controlla se è un messaggio JSON di controllo
+      if (message.length < 100) {
+        try {
+          const json = JSON.parse(message.toString());
+          
+          if (json.op === 'hello') {
+            console.log('👋 Hello from client:', json);
+            ws.send(JSON.stringify({ 
+              type: 'hello_ack', 
+              version: '1.0',
+              sessionId: session.sessionId 
+            }));
+            return;
+          }
+          
+          if (json.op === 'audio') {
+            // Header audio, il prossimo messaggio sarà il buffer audio
+            return;
+          }
+        } catch {
+          // Non è JSON, probabilmente è audio binario
+        }
       }
+
+      // Inizializza Deepgram se necessario
+      if (!deepgramConnection) {
+        console.log('🎤 Initializing Deepgram connection...');
+        
+        deepgramConnection = deepgramClient.listen.live({
+          language: 'it',
+          punctuate: true,
+          smart_format: true,
+          model: 'nova-2',
+          interim_results: true,
+          utterance_end_ms: 1000,
+          vad_events: true,
+        });
+
+        // Gestione eventi Deepgram
+        deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
+          console.log('✅ Deepgram connection opened');
+        });
+
+        deepgramConnection.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
+          const transcript = data.channel?.alternatives[0]?.transcript;
+          const isFinal = data.is_final;
+          const confidence = data.channel?.alternatives[0]?.confidence || 0;
+
+          if (transcript && transcript.length > 0) {
+            console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript}`);
+            
+            if (isFinal) {
+              transcriptBuffer += ' ' + transcript;
+              
+              // Genera suggerimento solo se:
+              // 1. È passato abbastanza tempo dall'ultimo
+              // 2. La confidence è alta
+              // 3. C'è abbastanza contesto
+              const now = Date.now();
+              if (confidence >= 0.7 && 
+                  transcriptBuffer.length > 50 && 
+                  (now - lastSuggestionTime) > SUGGESTION_DEBOUNCE_MS) {
+                
+                lastSuggestionTime = now;
+                
+                // Chiama la funzione GPT per generare suggerimenti
+                await handleGPTSuggestion(
+                  transcriptBuffer,
+                  ws,
+                  async (category: string, suggestion: string) => {
+                    // Callback per salvare il suggerimento
+                    if (session.userId !== 'demo-user') {
+                      await saveSuggestion(
+                        session,
+                        category,
+                        suggestion,
+                        transcriptBuffer.slice(-500), // Ultimi 500 caratteri di contesto
+                        confidence
+                      );
+                    }
+                  }
+                );
+                
+                // Mantieni solo gli ultimi 1000 caratteri nel buffer
+                if (transcriptBuffer.length > 1000) {
+                  transcriptBuffer = transcriptBuffer.slice(-800);
+                }
+              }
+            }
+          }
+        });
+
+        deepgramConnection.on(LiveTranscriptionEvents.Error, (error: any) => {
+          console.error('❌ Deepgram error:', error);
+        });
+
+        deepgramConnection.on(LiveTranscriptionEvents.Close, () => {
+          console.log('🔌 Deepgram connection closed');
+          deepgramConnection = null;
+        });
+      }
+
+      // Invia audio a Deepgram
+      if (deepgramConnection && deepgramConnection.getReadyState() === 1) {
+        deepgramConnection.send(message);
+      }
+
+    } catch (error) {
+      console.error('Error processing message:', error);
     }
   });
 
-  // ==========================================
-  // CHIUSURA
-  // ==========================================
-  ws.on("close", () => {
-    console.log("👋 Client disconnesso");
-    if (deepgramLive) deepgramLive.finish();
+  ws.on('close', async () => {
+    console.log('👋 WebSocket connection closed');
+    
+    const session = activeSessions.get(ws);
+    if (session && session.userId !== 'demo-user') {
+      // Log della fine sessione
+      const duration = (Date.now() - session.startTime.getTime()) / 1000;
+      
+      try {
+        await supabase
+          .from('sales_events')
+          .insert({
+            id: crypto.randomUUID(),
+            user_id: session.userId,
+            session_id: session.sessionId,
+            category: 'system',
+            suggestion: 'Session ended',
+            transcript_context: `Duration: ${duration}s`,
+            confidence: 1,
+            created_at: new Date().toISOString(),
+            metadata: { event: 'session_end', duration_seconds: duration }
+          });
+      } catch (error) {
+        console.error('Error logging session end:', error);
+      }
+    }
+    
+    // Cleanup
+    activeSessions.delete(ws);
+    
+    if (deepgramConnection) {
+      deepgramConnection.finish();
+    }
   });
 
-  ws.on("error", (err) => console.error("❌ WebSocket errore:", err));
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
 });
 
-// ==========================================
-// AVVIO SERVER
-// ==========================================
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 SalesGenius Backend running on port ${PORT}`);
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, closing connections...');
+  wss.close();
+  server.close();
+  process.exit(0);
 });
+
 
