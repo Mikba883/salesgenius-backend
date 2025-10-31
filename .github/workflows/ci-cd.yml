@@ -19,15 +19,18 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: '**/package.json'
+          cache-dependency-path: server/package-lock.json
 
       - name: Install dependencies
+        working-directory: ./server
         run: npm install
 
       - name: Type check
+        working-directory: ./server
         run: npm run type-check || echo "⚠️ Ignored TypeScript warnings for CI"
 
       - name: Build
+        working-directory: ./server
         run: npm run build
 
   deploy-backend:
@@ -48,5 +51,4 @@ jobs:
             https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json"
-
 
