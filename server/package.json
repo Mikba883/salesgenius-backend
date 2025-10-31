@@ -10,7 +10,13 @@
     "clean": "rm -rf dist",
     "type-check": "tsc --noEmit"
   },
-  "keywords": ["salesgenius", "websocket", "deepgram", "openai", "supabase"],
+  "keywords": [
+    "salesgenius",
+    "websocket",
+    "deepgram",
+    "openai",
+    "supabase"
+  ],
   "author": "Mikba883",
   "license": "MIT",
   "dependencies": {
@@ -30,4 +36,3 @@
     "typescript": "^5.6.3"
   }
 }
-
