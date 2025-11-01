@@ -3,7 +3,6 @@
 # 🎯 Stage 1: Build
 # ===============================
 FROM node:20-alpine AS builder
-
 WORKDIR /app
 
 # Copia package files
@@ -22,22 +21,18 @@ RUN npx tsc
 # 🚀 Stage 2: Production
 # ===============================
 FROM node:20-alpine
-
 WORKDIR /app
 
 # Copia package files
 COPY package*.json ./
 
 # Installa solo dipendenze di produzione
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copia i file compilati dal builder
 COPY --from=builder /app/dist ./dist
 
-# Copia eventuali file statici necessari (se esistono)
-COPY --from=builder /app/.env* ./ 2>/dev/null || true
-
-# Esponi la porta (Render la configura automaticamente)
+# Esponi la porta (Railway la configura automaticamente)
 EXPOSE 8080
 
 # Health check
@@ -46,5 +41,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Comando di avvio
 CMD ["node", "dist/server.js"]
-
-
