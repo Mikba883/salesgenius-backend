@@ -70,7 +70,7 @@ async function authenticateUser(authToken: string): Promise<{ userId: string; is
     const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
       .select('*')
-      .eq('id', user.id)
+      .eq('user_id', user.id)  // ✅ FIX #1: Cambiato da 'id' a 'user_id'
       .single();
 
     if (profileError) {
@@ -79,8 +79,8 @@ async function authenticateUser(authToken: string): Promise<{ userId: string; is
       return { userId: user.id, isPremium: false };
     }
 
-    // Il campo 'used' = true significa che l'utente è premium
-    const isPremium = profile?.used === true;
+    // Il campo 'is_premium' = true significa che l'utente è premium
+    const isPremium = profile?.is_premium === true;  // ✅ FIX #2: Cambiato da 'used' a 'is_premium'
     
     console.log(`✅ User authenticated: ${user.id}, Premium: ${isPremium}`);
     return { userId: user.id, isPremium };
@@ -362,5 +362,3 @@ process.on('SIGTERM', () => {
   server.close();
   process.exit(0);
 });
-
-
