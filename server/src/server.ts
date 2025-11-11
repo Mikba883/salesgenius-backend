@@ -9,10 +9,17 @@ import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/
 // Carica le variabili d'ambiente
 config();
 
-// Inizializza Supabase
-const supabase: SupabaseClient = createSupabaseClient(
+// Inizializza Supabase con DUE client:
+// 1. Client per autenticazione JWT (usa ANON_KEY)
+const supabaseAuth: SupabaseClient = createSupabaseClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY! // Usa SERVICE_KEY per operazioni server-side
+  process.env.SUPABASE_ANON_KEY!
+);
+
+// 2. Client per operazioni admin/server-side (usa SERVICE_KEY)
+const supabaseAdmin: SupabaseClient = createSupabaseClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
 );
 
 // Tipo per la sessione utente
@@ -54,12 +61,12 @@ const wss = new WebSocketServer({
 });
 
 /**
- * Verifica l'autenticazione dell'utente
+ * Verifica l'autenticazione dell'utente tramite JWT
  */
 async function authenticateUser(authToken: string): Promise<{ userId: string; isPremium: boolean } | null> {
   try {
-    // Decodifica e verifica il JWT token
-    const { data: { user }, error } = await supabase.auth.getUser(authToken);
+    // Decodifica e verifica il JWT token usando il client ANON
+    const { data: { user }, error } = await supabaseAuth.auth.getUser(authToken);
     
     if (error || !user) {
       console.error('Auth error:', error);
@@ -67,10 +74,11 @@ async function authenticateUser(authToken: string): Promise<{ userId: string; is
     }
 
     // Verifica se l'utente è premium (dalla tabella user_profiles)
-    const { data: profile, error: profileError } = await supabase
+    // Usa supabaseAdmin per questa query perché ha permessi elevati
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('user_profiles')
       .select('*')
-      .eq('user_id', user.id)  // ✅ FIX #1: Cambiato da 'id' a 'user_id'
+      .eq('user_id', user.id)
       .single();
 
     if (profileError) {
@@ -80,7 +88,7 @@ async function authenticateUser(authToken: string): Promise<{ userId: string; is
     }
 
     // Il campo 'is_premium' = true significa che l'utente è premium
-    const isPremium = profile?.is_premium === true;  // ✅ FIX #2: Cambiato da 'used' a 'is_premium'
+    const isPremium = profile?.is_premium === true;
     
     console.log(`✅ User authenticated: ${user.id}, Premium: ${isPremium}`);
     return { userId: user.id, isPremium };
@@ -101,7 +109,7 @@ async function saveSuggestion(
   confidence: number
 ): Promise<void> {
   try {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('sales_events')
       .insert({
         id: crypto.randomUUID(),
@@ -129,69 +137,8 @@ async function saveSuggestion(
 }
 
 // WebSocket connection handler
-wss.on('connection', async (ws: WebSocket, req: any) => {
-  console.log('🔌 New WebSocket connection attempt');
-
-  // Estrai il token dall'header Authorization o dalla query string
-  const authHeader = req.headers['authorization'];
-  const urlParams = new URLSearchParams(req.url?.split('?')[1] || '');
-  const token = authHeader?.replace('Bearer ', '') || urlParams.get('token');
-
-  // Se non c'è token, permetti comunque la connessione (modalità demo)
-  // In produzione, potresti voler rifiutare la connessione
-  if (!token) {
-    console.log('⚠️ No auth token provided - running in demo mode');
-    // Crea una sessione demo
-    const demoSession: UserSession = {
-      userId: 'demo-user',
-      isPremium: false,
-      sessionId: `demo_${Date.now()}`,
-      startTime: new Date(),
-      ws
-    };
-    activeSessions.set(ws, demoSession);
-  } else {
-    // Autentica l'utente
-    const authResult = await authenticateUser(token);
-    
-    if (!authResult) {
-      console.error('❌ Authentication failed');
-      ws.send(JSON.stringify({ 
-        type: 'error', 
-        message: 'Authentication failed. Please login again.' 
-      }));
-      ws.close(1008, 'Authentication failed');
-      return;
-    }
-
-    if (!authResult.isPremium) {
-      console.log('⚠️ User is not premium');
-      ws.send(JSON.stringify({ 
-        type: 'error', 
-        message: 'Premium subscription required for SalesGenius' 
-      }));
-      ws.close(1008, 'Premium required');
-      return;
-    }
-
-    // Crea la sessione autenticata
-    const session: UserSession = {
-      userId: authResult.userId,
-      isPremium: authResult.isPremium,
-      sessionId: `session_${Date.now()}_${authResult.userId.substring(0, 8)}`,
-      startTime: new Date(),
-      ws
-    };
-    
-    activeSessions.set(ws, session);
-    
-    // Invia conferma al client
-    ws.send(JSON.stringify({
-      type: 'auth_success',
-      sessionId: session.sessionId,
-      isPremium: session.isPremium
-    }));
-  }
+wss.on('connection', async (ws: WebSocket) => {
+  console.log('🔌 New WebSocket connection');
 
   let deepgramConnection: any = null;
   let transcriptBuffer = '';
@@ -199,22 +146,78 @@ wss.on('connection', async (ws: WebSocket, req: any) => {
   const SUGGESTION_DEBOUNCE_MS = 3000; // Almeno 3 secondi tra suggerimenti
 
   ws.on('message', async (message: Buffer) => {
-    const session = activeSessions.get(ws);
-    if (!session) return;
-
     try {
       // Controlla se è un messaggio JSON di controllo
       if (message.length < 100) {
         try {
           const json = JSON.parse(message.toString());
           
+          // Gestione messaggio HELLO con autenticazione
           if (json.op === 'hello') {
             console.log('👋 Hello from client:', json);
-            ws.send(JSON.stringify({ 
-              type: 'hello_ack', 
-              version: '1.0',
-              sessionId: session.sessionId 
-            }));
+            
+            // Se c'è un token, autentica l'utente
+            if (json.token) {
+              const authResult = await authenticateUser(json.token);
+              
+              if (!authResult) {
+                console.error('❌ Authentication failed');
+                ws.send(JSON.stringify({ 
+                  type: 'auth_failed', 
+                  reason: 'Invalid token' 
+                }));
+                ws.close(1008, 'Authentication failed');
+                return;
+              }
+
+              if (!authResult.isPremium) {
+                console.log('⚠️ User is not premium');
+                ws.send(JSON.stringify({ 
+                  type: 'auth_failed', 
+                  reason: 'Not premium' 
+                }));
+                ws.close(1008, 'Premium required');
+                return;
+              }
+
+              // Crea la sessione autenticata
+              const session: UserSession = {
+                userId: authResult.userId,
+                isPremium: authResult.isPremium,
+                sessionId: `session_${Date.now()}_${authResult.userId.substring(0, 8)}`,
+                startTime: new Date(),
+                ws
+              };
+              
+              activeSessions.set(ws, session);
+              
+              console.log(`✅ Premium user session created: ${session.sessionId}`);
+              
+              ws.send(JSON.stringify({
+                type: 'hello_ack',
+                version: '1.0',
+                sessionId: session.sessionId,
+                isPremium: true
+              }));
+            } else {
+              // Nessun token - modalità demo (per test)
+              console.log('⚠️ No token provided - demo mode');
+              const demoSession: UserSession = {
+                userId: 'demo-user',
+                isPremium: false,
+                sessionId: `demo_${Date.now()}`,
+                startTime: new Date(),
+                ws
+              };
+              activeSessions.set(ws, demoSession);
+              
+              ws.send(JSON.stringify({ 
+                type: 'hello_ack', 
+                version: '1.0',
+                sessionId: demoSession.sessionId,
+                isPremium: false
+              }));
+            }
             return;
           }
           
@@ -225,6 +228,13 @@ wss.on('connection', async (ws: WebSocket, req: any) => {
         } catch {
           // Non è JSON, probabilmente è audio binario
         }
+      }
+
+      // Verifica che esista una sessione
+      const session = activeSessions.get(ws);
+      if (!session) {
+        console.warn('⚠️ Received audio data without active session');
+        return;
       }
 
       // Inizializza Deepgram se necessario
@@ -273,7 +283,7 @@ wss.on('connection', async (ws: WebSocket, req: any) => {
                   transcriptBuffer,
                   ws,
                   async (category: string, suggestion: string) => {
-                    // Callback per salvare il suggerimento
+                    // Callback per salvare il suggerimento (solo per utenti autenticati)
                     if (session.userId !== 'demo-user') {
                       await saveSuggestion(
                         session,
@@ -324,7 +334,7 @@ wss.on('connection', async (ws: WebSocket, req: any) => {
       const duration = (Date.now() - session.startTime.getTime()) / 1000;
       
       try {
-        await supabase
+        await supabaseAdmin
           .from('sales_events')
           .insert({
             id: crypto.randomUUID(),
