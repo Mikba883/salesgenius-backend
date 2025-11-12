@@ -109,7 +109,7 @@ app.post('/debug-token', async (req, res) => {
       diagnosis = '❓ Formato token non riconosciuto - Verificare che provenga da supabase.auth.getSession()';
     }
 
-    res.json({
+    return res.json({
       success: true,
       tokenInfo: {
         header,
@@ -134,7 +134,7 @@ app.post('/debug-token', async (req, res) => {
       diagnosis
     });
   } catch (error: any) {
-    res.status(500).json({ 
+    return res.status(500).json({ 
       success: false,
       error: 'Error parsing token',
       message: error.message 
@@ -563,3 +563,4 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 console.log('✅ Graceful shutdown handlers registered');
+
