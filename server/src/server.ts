@@ -41,17 +41,52 @@ const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY!);
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.get('/health', (req, res) => {
-  res.json({ 
+// ==========================================
+// HEALTH CHECK ENDPOINTS (FIX PER RENDER)
+// ==========================================
+
+// Root endpoint - previene 404 sui health checks di Render
+app.get('/', (req, res) => {
+  res.status(200).json({ 
     status: 'ok', 
     service: 'salesgenius-backend',
+    version: '2.4.0',
+    uptime: Math.floor(process.uptime()),
+    connections: activeSessions.size,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Health check endpoint dedicato
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy',
+    uptime: Math.floor(process.uptime()),
+    activeSessions: activeSessions.size,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Endpoint per verificare la configurazione (debug)
+app.get('/status', (req, res) => {
+  res.status(200).json({
+    service: 'salesgenius-backend',
+    version: '2.4.0',
+    environment: process.env.NODE_ENV || 'development',
+    supabaseConnected: !!process.env.SUPABASE_URL,
+    deepgramConnected: !!process.env.DEEPGRAM_API_KEY,
+    openaiConnected: !!process.env.OPENAI_API_KEY,
+    activeSessions: activeSessions.size,
+    uptime: Math.floor(process.uptime()),
+    memory: process.memoryUsage(),
     timestamp: new Date().toISOString()
   });
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 SalesGenius Backend running on port ${PORT}`);
+  console.log(`🚀 SalesGenius Backend v2.4.0 running on port ${PORT}`);
   console.log(`✅ Supabase connected to: ${process.env.SUPABASE_URL}`);
+  console.log(`✅ Health check available at: http://localhost:${PORT}/health`);
 });
 
 // Setup WebSocket Server
@@ -193,9 +228,9 @@ wss.on('connection', async (ws: WebSocket) => {
               
               console.log(`✅ Premium user session created: ${session.sessionId}`);
               
+              // Invia messaggio di conferma - IMPORTANTE: backend pronto
               ws.send(JSON.stringify({
-                type: 'hello_ack',
-                version: '1.0',
+                type: 'capture_ready', // Questo messaggio fa partire l'audio nell'extension
                 sessionId: session.sessionId,
                 isPremium: true
               }));
@@ -212,8 +247,7 @@ wss.on('connection', async (ws: WebSocket) => {
               activeSessions.set(ws, demoSession);
               
               ws.send(JSON.stringify({ 
-                type: 'hello_ack', 
-                version: '1.0',
+                type: 'capture_ready',
                 sessionId: demoSession.sessionId,
                 isPremium: false
               }));
@@ -365,10 +399,91 @@ wss.on('connection', async (ws: WebSocket) => {
   });
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, closing connections...');
-  wss.close();
-  server.close();
-  process.exit(0);
+// ==========================================
+// GRACEFUL SHUTDOWN (FIX PER RENDER)
+// ==========================================
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) {
+    console.log('⏳ Shutdown already in progress...');
+    return;
+  }
+  
+  isShuttingDown = true;
+  console.log(`\n📡 ${signal} received, starting graceful shutdown...`);
+  
+  // 1. Stop accettare nuove connessioni
+  console.log('1️⃣ Stopping new connections...');
+  wss.close((err) => {
+    if (err) console.error('Error closing WebSocket server:', err);
+  });
+  
+  // 2. Notifica tutti i client connessi
+  console.log(`2️⃣ Notifying ${activeSessions.size} active clients...`);
+  const closePromises: Promise<void>[] = [];
+  
+  activeSessions.forEach((session, ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ 
+          type: 'server_shutdown',
+          message: 'Server is restarting. Please reconnect in a moment.'
+        }));
+        
+        closePromises.push(
+          new Promise<void>((resolve) => {
+            ws.close(1001, 'Server restarting');
+            setTimeout(resolve, 100);
+          })
+        );
+      } catch (error) {
+        console.error('Error notifying client:', error);
+      }
+    }
+  });
+  
+  // 3. Aspetta che tutti i client si disconnettano (max 5 secondi)
+  try {
+    await Promise.race([
+      Promise.all(closePromises),
+      new Promise(resolve => setTimeout(resolve, 5000))
+    ]);
+    console.log('3️⃣ All clients disconnected');
+  } catch (error) {
+    console.error('Error during client disconnection:', error);
+  }
+  
+  // 4. Chiudi il server HTTP
+  console.log('4️⃣ Closing HTTP server...');
+  server.close(() => {
+    console.log('✅ Server closed gracefully');
+    process.exit(0);
+  });
+  
+  // 5. Timeout di sicurezza - forza l'uscita dopo 10 secondi
+  setTimeout(() => {
+    console.error('⚠️ Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+// Gestisci SIGTERM (Render, Docker, Kubernetes)
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Gestisci SIGINT (Ctrl+C locale)
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Gestisci errori non catturati
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Non fare shutdown per unhandled rejections, solo logga
+});
+
+console.log('✅ Graceful shutdown handlers registered');
