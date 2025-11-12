@@ -148,7 +148,7 @@ wss.on('connection', async (ws: WebSocket) => {
   ws.on('message', async (message: Buffer) => {
     try {
       // Controlla se è un messaggio JSON di controllo
-      if (message.length < 100) {
+      if (message.length < 2000) {
         try {
           const json = JSON.parse(message.toString());
           
