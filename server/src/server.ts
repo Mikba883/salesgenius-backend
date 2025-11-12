@@ -39,6 +39,7 @@ const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY!);
 
 // Setup Express
 const app = express();
+app.use(express.json()); // Per gestire POST requests con JSON
 const PORT = process.env.PORT || 8080;
 
 // ==========================================
@@ -50,7 +51,7 @@ app.get('/', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
     service: 'salesgenius-backend',
-    version: '2.4.0',
+    version: '2.4.1',
     uptime: Math.floor(process.uptime()),
     connections: activeSessions.size,
     timestamp: new Date().toISOString()
@@ -67,11 +68,85 @@ app.get('/health', (req, res) => {
   });
 });
 
+// DEBUG ENDPOINT - Verifica token (TEMPORANEO PER SVILUPPO)
+app.post('/debug-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({ error: 'No token provided in request body' });
+    }
+
+    // Decodifica il token senza verificarlo
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return res.status(400).json({ error: 'Invalid JWT format - must have 3 parts separated by dots' });
+    }
+
+    const header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+
+    // Tenta autenticazione con Supabase
+    const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
+    
+    // Determina la diagnosi
+    let diagnosis = '';
+    if (payload.app_metadata && !payload.role) {
+      diagnosis = '❌ CUSTOM JWT - Non è un token Supabase. State usando jwt.sign() invece di supabase.auth.getSession()';
+    } else if (payload.role === 'authenticated' && payload.aud === 'authenticated') {
+      if (error) {
+        diagnosis = '⚠️ Token sembra Supabase ma validazione fallisce - Verificare SUPABASE_ANON_KEY nel backend o che il token non sia scaduto';
+      } else {
+        diagnosis = '✅ Token Supabase valido! Questo dovrebbe funzionare.';
+      }
+    } else if (header.kid && !payload.role) {
+      diagnosis = '⚠️ Token ha kid ma manca role - Potrebbe essere service_role_key invece di access_token';
+    } else if (payload.role === 'anon') {
+      diagnosis = '❌ State inviando ANON_KEY invece del session.access_token dell\'utente!';
+    } else if (payload.role === 'service_role') {
+      diagnosis = '❌ State inviando SERVICE_ROLE_KEY invece del session.access_token dell\'utente!';
+    } else {
+      diagnosis = '❓ Formato token non riconosciuto - Verificare che provenga da supabase.auth.getSession()';
+    }
+
+    res.json({
+      success: true,
+      tokenInfo: {
+        header,
+        payload: {
+          ...payload,
+          // Nascondi informazioni sensibili
+          email: payload.email ? '***@***' : undefined
+        },
+        hasKid: !!header.kid,
+        hasRole: !!payload.role,
+        hasAud: !!payload.aud,
+        hasAppMetadata: !!payload.app_metadata,
+        roleValue: payload.role || 'missing',
+        audValue: payload.aud || 'missing'
+      },
+      supabaseValidation: {
+        isValid: !error && !!user,
+        error: error?.message || null,
+        errorCode: error?.['code'] || null,
+        userId: user?.id || null
+      },
+      diagnosis
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      success: false,
+      error: 'Error parsing token',
+      message: error.message 
+    });
+  }
+});
+
 // Endpoint per verificare la configurazione (debug)
 app.get('/status', (req, res) => {
   res.status(200).json({
     service: 'salesgenius-backend',
-    version: '2.4.0',
+    version: '2.4.1',
     environment: process.env.NODE_ENV || 'development',
     supabaseConnected: !!process.env.SUPABASE_URL,
     deepgramConnected: !!process.env.DEEPGRAM_API_KEY,
@@ -84,9 +159,10 @@ app.get('/status', (req, res) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 SalesGenius Backend v2.4.0 running on port ${PORT}`);
+  console.log(`🚀 SalesGenius Backend v2.4.1 running on port ${PORT}`);
   console.log(`✅ Supabase connected to: ${process.env.SUPABASE_URL}`);
   console.log(`✅ Health check available at: http://localhost:${PORT}/health`);
+  console.log(`🔍 Debug token endpoint: http://localhost:${PORT}/debug-token (POST)`);
 });
 
 // Setup WebSocket Server
