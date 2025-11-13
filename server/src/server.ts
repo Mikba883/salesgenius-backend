@@ -260,11 +260,16 @@ wss.on('connection', async (ws: WebSocket) => {
 
   ws.on('message', async (message: Buffer) => {
     try {
+      // Log della dimensione del messaggio per debug
+      if (message.length < 100) {
+        console.log(`📨 Received message: ${message.length} bytes`);
+      }
+
       // Controlla se è un messaggio JSON di controllo
       if (message.length < 2000) {
         try {
           const json = JSON.parse(message.toString());
-          
+
           // Gestione messaggio HELLO con autenticazione
           if (json.op === 'hello') {
             console.log('👋 Hello from client:', json);
@@ -347,6 +352,11 @@ wss.on('connection', async (ws: WebSocket) => {
       if (!session) {
         console.warn('⚠️ Received audio data without active session');
         return;
+      }
+
+      // Log per pacchetti audio
+      if (message.length >= 2000) {
+        console.log(`🎵 Audio packet received: ${message.length} bytes`);
       }
 
       // Inizializza Deepgram se necessario
@@ -443,16 +453,20 @@ wss.on('connection', async (ws: WebSocket) => {
 
       // Invia audio a Deepgram (o bufferizza se non è ancora pronto)
       if (deepgramConnection) {
-        if (deepgramReady && deepgramConnection.getReadyState() === 1) {
+        const readyState = deepgramConnection.getReadyState();
+        console.log(`🔍 Deepgram state - Ready: ${deepgramReady}, ReadyState: ${readyState}`);
+
+        if (deepgramReady && readyState === 1) {
           // Deepgram è pronto: invia immediatamente
+          console.log(`✅ Sending audio packet directly to Deepgram (${message.length} bytes)`);
           deepgramConnection.send(message);
         } else {
           // Deepgram non è ancora pronto: bufferizza il pacchetto
           audioBuffer.push(message);
-          if (audioBuffer.length % 10 === 0) { // Log ogni 10 pacchetti per non intasare i log
-            console.log(`📦 Buffering audio packets... (${audioBuffer.length} in queue)`);
-          }
+          console.log(`📦 Buffering audio packet... (${audioBuffer.length} in queue, ready: ${deepgramReady}, state: ${readyState})`);
         }
+      } else {
+        console.log('⚠️ No Deepgram connection available to send audio');
       }
 
     } catch (error) {
