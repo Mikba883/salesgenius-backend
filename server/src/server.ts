@@ -42,6 +42,8 @@ const app = express();
 app.use(express.json()); // Per gestire POST requests con JSON
 const PORT = process.env.PORT || 8080;
 
+console.log('🚀 Server starting with DEBUG LOGGING ENABLED - Version 2.4.2');
+
 // ==========================================
 // HEALTH CHECK ENDPOINTS (FIX PER RENDER)
 // ==========================================
@@ -159,10 +161,11 @@ app.get('/status', (req, res) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 SalesGenius Backend v2.4.1 running on port ${PORT}`);
+  console.log(`🚀 SalesGenius Backend v2.4.2-DEBUG running on port ${PORT}`);
   console.log(`✅ Supabase connected to: ${process.env.SUPABASE_URL}`);
   console.log(`✅ Health check available at: http://localhost:${PORT}/health`);
   console.log(`🔍 Debug token endpoint: http://localhost:${PORT}/debug-token (POST)`);
+  console.log(`⚡ FULL DEBUG LOGGING ACTIVE - Every message will be logged`);
 });
 
 // Setup WebSocket Server
@@ -252,20 +255,27 @@ wss.on('connection', async (ws: WebSocket) => {
   console.log('🔌 New WebSocket connection');
 
   let deepgramConnection: any = null;
+  let deepgramReady = false; // Flag per tracciare quando Deepgram è pronto
+  let audioBuffer: Buffer[] = []; // Buffer per pacchetti audio in attesa
+  let audioPacketsSent = 0; // Contatore pacchetti inviati a Deepgram
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
   const SUGGESTION_DEBOUNCE_MS = 3000; // Almeno 3 secondi tra suggerimenti
 
   ws.on('message', async (message: Buffer) => {
+    // LOG ASSOLUTO: Ogni messaggio ricevuto
+    console.log(`📨 RAW MESSAGE: ${message.length} bytes, isBuffer: ${Buffer.isBuffer(message)}`);
+
     try {
+
       // Controlla se è un messaggio JSON di controllo
       if (message.length < 2000) {
         try {
           const json = JSON.parse(message.toString());
-          
+
           // Gestione messaggio HELLO con autenticazione
           if (json.op === 'hello') {
-            console.log('👋 Hello from client:', json);
+            console.log('👋 Hello from client:', { op: json.op, hasToken: !!json.token });
             
             // Se c'è un token, autentica l'utente
             if (json.token) {
@@ -333,18 +343,32 @@ wss.on('connection', async (ws: WebSocket) => {
           
           if (json.op === 'audio') {
             // Header audio, il prossimo messaggio sarà il buffer audio
+            console.log('🎧 Audio header received (ignored)');
             return;
           }
-        } catch {
+
+          // Messaggio JSON non riconosciuto
+          console.log('❓ Unknown JSON message:', json);
+        } catch (jsonError) {
           // Non è JSON, probabilmente è audio binario
+          console.log('🔄 JSON parse failed, treating as binary audio data');
         }
       }
 
       // Verifica che esista una sessione
       const session = activeSessions.get(ws);
       if (!session) {
-        console.warn('⚠️ Received audio data without active session');
+        console.warn(`⚠️ Received data without active session! Size: ${message.length} bytes`);
         return;
+      }
+
+      console.log(`✅ Session found: ${session.sessionId}`);
+
+      // Log per pacchetti audio
+      if (message.length >= 2000) {
+        console.log(`🎵 Audio packet received: ${message.length} bytes`);
+      } else if (message.length > 0) {
+        console.log(`📊 Small packet received: ${message.length} bytes (not typical audio size)`);
       }
 
       // Inizializza Deepgram se necessario
@@ -364,6 +388,20 @@ wss.on('connection', async (ws: WebSocket) => {
         // Gestione eventi Deepgram
         deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
           console.log('✅ Deepgram connection opened');
+          deepgramReady = true;
+
+          // Invia tutti i pacchetti audio bufferizzati
+          if (audioBuffer.length > 0) {
+            console.log(`📤 Sending ${audioBuffer.length} buffered audio packets to Deepgram`);
+            audioBuffer.forEach(packet => {
+              if (deepgramConnection && deepgramConnection.getReadyState() === 1) {
+                deepgramConnection.send(packet);
+                audioPacketsSent++;
+              }
+            });
+            console.log(`   ✅ Total packets sent to Deepgram so far: ${audioPacketsSent}`);
+            audioBuffer = []; // Svuota il buffer
+          }
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
@@ -416,18 +454,41 @@ wss.on('connection', async (ws: WebSocket) => {
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Error, (error: any) => {
-          console.error('❌ Deepgram error:', error);
+          console.error('❌ Deepgram error:', JSON.stringify(error, null, 2));
         });
 
-        deepgramConnection.on(LiveTranscriptionEvents.Close, () => {
-          console.log('🔌 Deepgram connection closed');
+        deepgramConnection.on(LiveTranscriptionEvents.Close, (closeEvent: any) => {
+          console.log('🔌 Deepgram connection closed:', closeEvent);
+          console.log(`   - Had ${audioBuffer.length} buffered packets at close time`);
+          console.log(`   - Total packets sent: ${audioPacketsSent}`);
+          console.log(`   - deepgramReady was: ${deepgramReady}`);
           deepgramConnection = null;
+          deepgramReady = false;
+          audioBuffer = []; // Pulisci il buffer
+        });
+
+        deepgramConnection.on(LiveTranscriptionEvents.Metadata, (metadata: any) => {
+          console.log('📊 Deepgram metadata:', metadata);
         });
       }
 
-      // Invia audio a Deepgram
-      if (deepgramConnection && deepgramConnection.getReadyState() === 1) {
-        deepgramConnection.send(message);
+      // Invia audio a Deepgram (o bufferizza se non è ancora pronto)
+      if (deepgramConnection) {
+        const readyState = deepgramConnection.getReadyState();
+        console.log(`🔍 Deepgram state - Ready: ${deepgramReady}, ReadyState: ${readyState}`);
+
+        if (deepgramReady && readyState === 1) {
+          // Deepgram è pronto: invia immediatamente
+          deepgramConnection.send(message);
+          audioPacketsSent++;
+          console.log(`✅ Sending audio packet directly to Deepgram (${message.length} bytes) - Total sent: ${audioPacketsSent}`);
+        } else {
+          // Deepgram non è ancora pronto: bufferizza il pacchetto
+          audioBuffer.push(message);
+          console.log(`📦 Buffering audio packet... (${audioBuffer.length} in queue, ready: ${deepgramReady}, state: ${readyState})`);
+        }
+      } else {
+        console.log('⚠️ No Deepgram connection available to send audio');
       }
 
     } catch (error) {
