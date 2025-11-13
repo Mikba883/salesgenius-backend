@@ -282,12 +282,12 @@ wss.on('connection', async (ws: WebSocket) => {
               }
 
               if (!authResult.isPremium) {
-                console.log('⚠️ User is not premium');
-                ws.send(JSON.stringify({ 
-                  type: 'auth_failed', 
-                  reason: 'Not premium' 
+                console.log('⚠️ User is not premium - upgrade required');
+                ws.send(JSON.stringify({
+                  type: 'auth_failed',
+                  reason: 'not_premium'
                 }));
-                ws.close(1008, 'Premium required');
+                ws.close(1008, 'Premium subscription required');
                 return;
               }
 
