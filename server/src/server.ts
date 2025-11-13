@@ -5,6 +5,7 @@ import { createClient, DeepgramClient, LiveTranscriptionEvents } from '@deepgram
 import { config } from 'dotenv';
 import { handleGPTSuggestion } from './gpt-handler';
 import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/supabase-js';
+import rateLimit from 'express-rate-limit';
 
 // Carica le variabili d'ambiente
 config();
@@ -45,6 +46,37 @@ const PORT = process.env.PORT || 8080;
 console.log('🚀 Server starting with DEBUG LOGGING ENABLED - Version 2.4.2');
 
 // ==========================================
+// RATE LIMITING (Protezione Costi)
+// ==========================================
+
+// Rate limiter generale per tutte le API
+const apiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minuti
+  max: 100, // max 100 requests per 5 minuti per IP
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limiter più restrittivo per debug endpoint
+const debugLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minuti
+  max: 5, // max 5 requests per 15 minuti
+  message: 'Too many debug requests, please try again later.',
+});
+
+// Applica rate limiting a tutte le route
+app.use(apiLimiter);
+
+// Tracking connessioni WebSocket per utente (in-memory)
+const userConnections = new Map<string, number>(); // userId -> numero connessioni attive
+const MAX_CONNECTIONS_PER_USER = 2;
+
+// Tracking suggerimenti per rate limiting
+const userSuggestions = new Map<string, { count: number; resetTime: number }>(); // userId -> {count, resetTime}
+const MAX_SUGGESTIONS_PER_5MIN = 10;
+
+// ==========================================
 // HEALTH CHECK ENDPOINTS (FIX PER RENDER)
 // ==========================================
 
@@ -70,8 +102,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// DEBUG ENDPOINT - Verifica token (TEMPORANEO PER SVILUPPO)
-app.post('/debug-token', async (req, res) => {
+// DEBUG ENDPOINT - Verifica token (SOLO IN SVILUPPO)
+app.post('/debug-token', debugLimiter, async (req, res) => {
+  // Blocca in produzione
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'Debug endpoint disabled in production' });
+  }
   try {
     const { token } = req.body;
     
@@ -261,6 +297,7 @@ wss.on('connection', async (ws: WebSocket) => {
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
   const SUGGESTION_DEBOUNCE_MS = 3000; // Almeno 3 secondi tra suggerimenti
+  let currentUserId: string | null = null; // Traccia userId per rate limiting
 
   ws.on('message', async (message: Buffer) => {
     // LOG ASSOLUTO: Ogni messaggio ricevuto
@@ -293,13 +330,29 @@ wss.on('connection', async (ws: WebSocket) => {
 
               if (!authResult.isPremium) {
                 console.log('⚠️ User is not premium');
-                ws.send(JSON.stringify({ 
-                  type: 'auth_failed', 
-                  reason: 'Not premium' 
+                ws.send(JSON.stringify({
+                  type: 'auth_failed',
+                  reason: 'Not premium'
                 }));
                 ws.close(1008, 'Premium required');
                 return;
               }
+
+              // ⚡ CONTROLLO MAX CONNESSIONI PER UTENTE
+              const currentConnections = userConnections.get(authResult.userId) || 0;
+              if (currentConnections >= MAX_CONNECTIONS_PER_USER) {
+                console.log(`❌ User ${authResult.userId} exceeded max connections (${currentConnections}/${MAX_CONNECTIONS_PER_USER})`);
+                ws.send(JSON.stringify({
+                  type: 'auth_failed',
+                  reason: 'Too many active connections. Close other tabs and try again.'
+                }));
+                ws.close(1008, 'Max connections exceeded');
+                return;
+              }
+
+              // Incrementa contatore connessioni
+              userConnections.set(authResult.userId, currentConnections + 1);
+              currentUserId = authResult.userId;
 
               // Crea la sessione autenticata
               const session: UserSession = {
@@ -309,10 +362,10 @@ wss.on('connection', async (ws: WebSocket) => {
                 startTime: new Date(),
                 ws
               };
-              
+
               activeSessions.set(ws, session);
-              
-              console.log(`✅ Premium user session created: ${session.sessionId}`);
+
+              console.log(`✅ Premium user session created: ${session.sessionId} (connections: ${currentConnections + 1}/${MAX_CONNECTIONS_PER_USER})`);
               
               // Invia messaggio di conferma - IMPORTANTE: backend pronto
               ws.send(JSON.stringify({
@@ -419,13 +472,44 @@ wss.on('connection', async (ws: WebSocket) => {
               // 1. È passato abbastanza tempo dall'ultimo
               // 2. La confidence è alta
               // 3. C'è abbastanza contesto
+              // 4. ⚡ NON ha superato il rate limit
               const now = Date.now();
-              if (confidence >= 0.7 && 
-                  transcriptBuffer.length > 50 && 
+              if (confidence >= 0.7 &&
+                  transcriptBuffer.length > 50 &&
                   (now - lastSuggestionTime) > SUGGESTION_DEBOUNCE_MS) {
-                
+
+                // ⚡ CONTROLLO RATE LIMIT SUGGERIMENTI
+                if (session.userId !== 'demo-user') {
+                  const userStats = userSuggestions.get(session.userId);
+                  const currentTime = Date.now();
+
+                  if (!userStats || currentTime > userStats.resetTime) {
+                    // Reset contatore ogni 5 minuti
+                    userSuggestions.set(session.userId, {
+                      count: 0,
+                      resetTime: currentTime + 5 * 60 * 1000
+                    });
+                  }
+
+                  const stats = userSuggestions.get(session.userId)!;
+
+                  if (stats.count >= MAX_SUGGESTIONS_PER_5MIN) {
+                    console.log(`⚠️ User ${session.userId} exceeded suggestion rate limit (${stats.count}/${MAX_SUGGESTIONS_PER_5MIN})`);
+                    ws.send(JSON.stringify({
+                      type: 'rate_limit',
+                      message: 'Rate limit reached. Please wait a few minutes.',
+                      resetTime: stats.resetTime
+                    }));
+                    return;
+                  }
+
+                  // Incrementa contatore
+                  stats.count++;
+                  console.log(`📊 Suggestion ${stats.count}/${MAX_SUGGESTIONS_PER_5MIN} for user ${session.userId}`);
+                }
+
                 lastSuggestionTime = now;
-                
+
                 // Chiama la funzione GPT per generare suggerimenti
                 await handleGPTSuggestion(
                   transcriptBuffer,
@@ -443,7 +527,7 @@ wss.on('connection', async (ws: WebSocket) => {
                     }
                   }
                 );
-                
+
                 // Mantieni solo gli ultimi 1000 caratteri nel buffer
                 if (transcriptBuffer.length > 1000) {
                   transcriptBuffer = transcriptBuffer.slice(-800);
@@ -498,12 +582,24 @@ wss.on('connection', async (ws: WebSocket) => {
 
   ws.on('close', async () => {
     console.log('👋 WebSocket connection closed');
-    
+
+    // ⚡ DECREMENTA CONTATORE CONNESSIONI
+    if (currentUserId) {
+      const connections = userConnections.get(currentUserId) || 0;
+      if (connections > 0) {
+        userConnections.set(currentUserId, connections - 1);
+        console.log(`📉 User ${currentUserId} connections: ${connections - 1}/${MAX_CONNECTIONS_PER_USER}`);
+      }
+      if (connections - 1 <= 0) {
+        userConnections.delete(currentUserId);
+      }
+    }
+
     const session = activeSessions.get(ws);
     if (session && session.userId !== 'demo-user') {
       // Log della fine sessione
       const duration = (Date.now() - session.startTime.getTime()) / 1000;
-      
+
       try {
         await supabaseAdmin
           .from('sales_events')
@@ -522,7 +618,7 @@ wss.on('connection', async (ws: WebSocket) => {
         console.error('Error logging session end:', error);
       }
     }
-    
+
     // Cleanup
     activeSessions.delete(ws);
     

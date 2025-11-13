@@ -95,17 +95,24 @@ export async function handleGPTSuggestion(
 
     const suggestionId = `s-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // ✅ CORRETTA CHIAMATA GPT (compatibile TypeScript)
-    const completion = await openai.chat.completions.create({
-      model: qualitySettings.model,
-      messages: messages as any,
-      temperature: qualitySettings.temperature,
-      max_tokens: qualitySettings.max_tokens,
-      presence_penalty: qualitySettings.presence_penalty,
-      // @ts-ignore: some models may not accept this field, safe to include for legacy tuning
-      frequency_penalty: (qualitySettings as any).frequency_penalty ?? 0,
-      response_format: { type: 'json_object' },
-    });
+    // ✅ CORRETTA CHIAMATA GPT (compatibile TypeScript) + TIMEOUT PROTECTION
+    const GPT_TIMEOUT_MS = 8000; // 8 secondi max
+
+    const completion = await Promise.race([
+      openai.chat.completions.create({
+        model: qualitySettings.model,
+        messages: messages as any,
+        temperature: qualitySettings.temperature,
+        max_tokens: qualitySettings.max_tokens,
+        presence_penalty: qualitySettings.presence_penalty,
+        // @ts-ignore: some models may not accept this field, safe to include for legacy tuning
+        frequency_penalty: (qualitySettings as any).frequency_penalty ?? 0,
+        response_format: { type: 'json_object' },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('OpenAI request timeout')), GPT_TIMEOUT_MS)
+      )
+    ]);
 
     const responseText = completion.choices[0]?.message?.content || '{}';
     let parsedResponse;
