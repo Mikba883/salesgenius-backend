@@ -252,6 +252,8 @@ wss.on('connection', async (ws: WebSocket) => {
   console.log('🔌 New WebSocket connection');
 
   let deepgramConnection: any = null;
+  let deepgramReady = false; // Flag per tracciare quando Deepgram è pronto
+  let audioBuffer: Buffer[] = []; // Buffer per pacchetti audio in attesa
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
   const SUGGESTION_DEBOUNCE_MS = 3000; // Almeno 3 secondi tra suggerimenti
@@ -364,6 +366,18 @@ wss.on('connection', async (ws: WebSocket) => {
         // Gestione eventi Deepgram
         deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
           console.log('✅ Deepgram connection opened');
+          deepgramReady = true;
+
+          // Invia tutti i pacchetti audio bufferizzati
+          if (audioBuffer.length > 0) {
+            console.log(`📤 Sending ${audioBuffer.length} buffered audio packets to Deepgram`);
+            audioBuffer.forEach(packet => {
+              if (deepgramConnection && deepgramConnection.getReadyState() === 1) {
+                deepgramConnection.send(packet);
+              }
+            });
+            audioBuffer = []; // Svuota il buffer
+          }
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
@@ -422,12 +436,23 @@ wss.on('connection', async (ws: WebSocket) => {
         deepgramConnection.on(LiveTranscriptionEvents.Close, () => {
           console.log('🔌 Deepgram connection closed');
           deepgramConnection = null;
+          deepgramReady = false;
+          audioBuffer = []; // Pulisci il buffer
         });
       }
 
-      // Invia audio a Deepgram
-      if (deepgramConnection && deepgramConnection.getReadyState() === 1) {
-        deepgramConnection.send(message);
+      // Invia audio a Deepgram (o bufferizza se non è ancora pronto)
+      if (deepgramConnection) {
+        if (deepgramReady && deepgramConnection.getReadyState() === 1) {
+          // Deepgram è pronto: invia immediatamente
+          deepgramConnection.send(message);
+        } else {
+          // Deepgram non è ancora pronto: bufferizza il pacchetto
+          audioBuffer.push(message);
+          if (audioBuffer.length % 10 === 0) { // Log ogni 10 pacchetti per non intasare i log
+            console.log(`📦 Buffering audio packets... (${audioBuffer.length} in queue)`);
+          }
+        }
       }
 
     } catch (error) {
