@@ -13,6 +13,50 @@ const supabase_js_1 = require("@supabase/supabase-js");
 const supabaseAuth = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const supabaseAdmin = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const activeSessions = new Map();
+const suggestionRateLimits = new Map();
+const SUGGESTION_LIMIT = 10;
+const SUGGESTION_WINDOW_MS = 5 * 60 * 1000;
+const connectionCounts = new Map();
+const MAX_CONNECTIONS_PER_USER = 2;
+function canGenerateSuggestion(userId) {
+    const now = Date.now();
+    const limit = suggestionRateLimits.get(userId);
+    if (!limit || now > limit.resetAt) {
+        suggestionRateLimits.set(userId, {
+            count: 1,
+            resetAt: now + SUGGESTION_WINDOW_MS
+        });
+        return true;
+    }
+    if (limit.count < SUGGESTION_LIMIT) {
+        limit.count++;
+        return true;
+    }
+    return false;
+}
+function canOpenConnection(userId) {
+    const count = connectionCounts.get(userId) || 0;
+    return count < MAX_CONNECTIONS_PER_USER;
+}
+function registerConnection(userId) {
+    const count = connectionCounts.get(userId) || 0;
+    connectionCounts.set(userId, count + 1);
+}
+function unregisterConnection(userId) {
+    const count = connectionCounts.get(userId) || 0;
+    if (count > 0) {
+        connectionCounts.set(userId, count - 1);
+    }
+}
+setInterval(() => {
+    const now = Date.now();
+    for (const [userId, limit] of suggestionRateLimits.entries()) {
+        if (now > limit.resetAt) {
+            suggestionRateLimits.delete(userId);
+        }
+    }
+    console.log(`🧹 Rate limit cleanup: ${suggestionRateLimits.size} active limits`);
+}, 10 * 60 * 1000);
 const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
@@ -35,75 +79,81 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
-app.post('/debug-token', async (req, res) => {
-    try {
-        const { token } = req.body;
-        if (!token) {
-            return res.status(400).json({ error: 'No token provided in request body' });
-        }
-        const parts = token.split('.');
-        if (parts.length !== 3) {
-            return res.status(400).json({ error: 'Invalid JWT format - must have 3 parts separated by dots' });
-        }
-        const header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-        const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
-        let diagnosis = '';
-        if (payload.app_metadata && !payload.role) {
-            diagnosis = '❌ CUSTOM JWT - Non è un token Supabase. State usando jwt.sign() invece di supabase.auth.getSession()';
-        }
-        else if (payload.role === 'authenticated' && payload.aud === 'authenticated') {
-            if (error) {
-                diagnosis = '⚠️ Token sembra Supabase ma validazione fallisce - Verificare SUPABASE_ANON_KEY nel backend o che il token non sia scaduto';
+if (process.env.NODE_ENV !== 'production') {
+    app.post('/debug-token', async (req, res) => {
+        try {
+            const { token } = req.body;
+            if (!token) {
+                return res.status(400).json({ error: 'No token provided in request body' });
+            }
+            const parts = token.split('.');
+            if (parts.length !== 3) {
+                return res.status(400).json({ error: 'Invalid JWT format - must have 3 parts separated by dots' });
+            }
+            const header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+            const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
+            let diagnosis = '';
+            if (payload.app_metadata && !payload.role) {
+                diagnosis = '❌ CUSTOM JWT - Non è un token Supabase. State usando jwt.sign() invece di supabase.auth.getSession()';
+            }
+            else if (payload.role === 'authenticated' && payload.aud === 'authenticated') {
+                if (error) {
+                    diagnosis = '⚠️ Token sembra Supabase ma validazione fallisce - Verificare SUPABASE_ANON_KEY nel backend o che il token non sia scaduto';
+                }
+                else {
+                    diagnosis = '✅ Token Supabase valido! Questo dovrebbe funzionare.';
+                }
+            }
+            else if (header.kid && !payload.role) {
+                diagnosis = '⚠️ Token ha kid ma manca role - Potrebbe essere service_role_key invece di access_token';
+            }
+            else if (payload.role === 'anon') {
+                diagnosis = '❌ State inviando ANON_KEY invece del session.access_token dell\'utente!';
+            }
+            else if (payload.role === 'service_role') {
+                diagnosis = '❌ State inviando SERVICE_ROLE_KEY invece del session.access_token dell\'utente!';
             }
             else {
-                diagnosis = '✅ Token Supabase valido! Questo dovrebbe funzionare.';
+                diagnosis = '❓ Formato token non riconosciuto - Verificare che provenga da supabase.auth.getSession()';
             }
-        }
-        else if (header.kid && !payload.role) {
-            diagnosis = '⚠️ Token ha kid ma manca role - Potrebbe essere service_role_key invece di access_token';
-        }
-        else if (payload.role === 'anon') {
-            diagnosis = '❌ State inviando ANON_KEY invece del session.access_token dell\'utente!';
-        }
-        else if (payload.role === 'service_role') {
-            diagnosis = '❌ State inviando SERVICE_ROLE_KEY invece del session.access_token dell\'utente!';
-        }
-        else {
-            diagnosis = '❓ Formato token non riconosciuto - Verificare che provenga da supabase.auth.getSession()';
-        }
-        return res.json({
-            success: true,
-            tokenInfo: {
-                header,
-                payload: {
-                    ...payload,
-                    email: payload.email ? '***@***' : undefined
+            return res.json({
+                success: true,
+                tokenInfo: {
+                    header,
+                    payload: {
+                        ...payload,
+                        email: payload.email ? '***@***' : undefined
+                    },
+                    hasKid: !!header.kid,
+                    hasRole: !!payload.role,
+                    hasAud: !!payload.aud,
+                    hasAppMetadata: !!payload.app_metadata,
+                    roleValue: payload.role || 'missing',
+                    audValue: payload.aud || 'missing'
                 },
-                hasKid: !!header.kid,
-                hasRole: !!payload.role,
-                hasAud: !!payload.aud,
-                hasAppMetadata: !!payload.app_metadata,
-                roleValue: payload.role || 'missing',
-                audValue: payload.aud || 'missing'
-            },
-            supabaseValidation: {
-                isValid: !error && !!user,
-                error: error?.message || null,
-                errorCode: error?.['code'] || null,
-                userId: user?.id || null
-            },
-            diagnosis
-        });
-    }
-    catch (error) {
-        return res.status(500).json({
-            success: false,
-            error: 'Error parsing token',
-            message: error.message
-        });
-    }
-});
+                supabaseValidation: {
+                    isValid: !error && !!user,
+                    error: error?.message || null,
+                    errorCode: error?.['code'] || null,
+                    userId: user?.id || null
+                },
+                diagnosis
+            });
+        }
+        catch (error) {
+            return res.status(500).json({
+                success: false,
+                error: 'Error parsing token',
+                message: error.message
+            });
+        }
+    });
+    console.log('🔍 Debug endpoint /debug-token enabled (development mode)');
+}
+else {
+    console.log('🔒 Debug endpoint /debug-token disabled (production mode)');
+}
 app.get('/status', (req, res) => {
     res.status(200).json({
         service: 'salesgenius-backend',
@@ -215,6 +265,17 @@ wss.on('connection', async (ws) => {
                                 ws.close(1008, 'Premium subscription required');
                                 return;
                             }
+                            if (!canOpenConnection(authResult.userId)) {
+                                console.warn(`⚠️ Rate limit: User ${authResult.userId} exceeded max connections`);
+                                ws.send(JSON.stringify({
+                                    type: 'rate_limit_exceeded',
+                                    reason: 'too_many_connections',
+                                    message: `Massimo ${MAX_CONNECTIONS_PER_USER} connessioni simultanee permesse`
+                                }));
+                                ws.close(1008, 'Too many connections');
+                                return;
+                            }
+                            registerConnection(authResult.userId);
                             const session = {
                                 userId: authResult.userId,
                                 isPremium: authResult.isPremium,
@@ -287,6 +348,15 @@ wss.on('connection', async (ws) => {
                                 transcriptBuffer.length > 50 &&
                                 (now - lastSuggestionTime) > SUGGESTION_DEBOUNCE_MS) {
                                 lastSuggestionTime = now;
+                                if (!canGenerateSuggestion(session.userId)) {
+                                    console.warn(`⚠️ Rate limit: User ${session.userId} exceeded suggestion quota`);
+                                    ws.send(JSON.stringify({
+                                        type: 'rate_limit_exceeded',
+                                        reason: 'too_many_suggestions',
+                                        message: `Massimo ${SUGGESTION_LIMIT} suggerimenti ogni ${SUGGESTION_WINDOW_MS / 60000} minuti`
+                                    }));
+                                    return;
+                                }
                                 await (0, gpt_handler_1.handleGPTSuggestion)(transcriptBuffer, ws, async (category, suggestion) => {
                                     if (session.userId !== 'demo-user') {
                                         await saveSuggestion(session, category, suggestion, transcriptBuffer.slice(-500), confidence);
@@ -338,6 +408,9 @@ wss.on('connection', async (ws) => {
             catch (error) {
                 console.error('Error logging session end:', error);
             }
+        }
+        if (session) {
+            unregisterConnection(session.userId);
         }
         activeSessions.delete(ws);
         if (deepgramConnection) {

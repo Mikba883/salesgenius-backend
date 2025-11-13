@@ -95,17 +95,24 @@ export async function handleGPTSuggestion(
 
     const suggestionId = `s-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // ✅ CORRETTA CHIAMATA GPT (compatibile TypeScript)
-    const completion = await openai.chat.completions.create({
-      model: qualitySettings.model,
-      messages: messages as any,
-      temperature: qualitySettings.temperature,
-      max_tokens: qualitySettings.max_tokens,
-      presence_penalty: qualitySettings.presence_penalty,
-      // @ts-ignore: some models may not accept this field, safe to include for legacy tuning
-      frequency_penalty: (qualitySettings as any).frequency_penalty ?? 0,
-      response_format: { type: 'json_object' },
-    });
+    // ✅ CORRETTA CHIAMATA GPT con TIMEOUT (8 secondi max)
+    const OPENAI_TIMEOUT_MS = 8000;
+
+    const completion = await Promise.race([
+      openai.chat.completions.create({
+        model: qualitySettings.model,
+        messages: messages as any,
+        temperature: qualitySettings.temperature,
+        max_tokens: qualitySettings.max_tokens,
+        presence_penalty: qualitySettings.presence_penalty,
+        // @ts-ignore: some models may not accept this field, safe to include for legacy tuning
+        frequency_penalty: (qualitySettings as any).frequency_penalty ?? 0,
+        response_format: { type: 'json_object' },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('OpenAI API timeout after 8s')), OPENAI_TIMEOUT_MS)
+      )
+    ]);
 
     const responseText = completion.choices[0]?.message?.content || '{}';
     let parsedResponse;
@@ -181,12 +188,16 @@ export async function handleGPTSuggestion(
     console.log(`🤖 [${category}/${intent}] ${language}: ${suggestion}`);
 
     if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
-  } catch (error) {
-    console.error('Error generating GPT suggestion:', error);
+  } catch (error: any) {
+    const isTimeout = error?.message?.includes('timeout');
+    console.error(`Error generating GPT suggestion${isTimeout ? ' (timeout)' : ''}:`, error);
     ws.send(
       JSON.stringify({
         type: 'error',
-        message: 'Errore nella generazione del suggerimento',
+        message: isTimeout
+          ? 'Timeout generazione suggerimento - riprova tra poco'
+          : 'Errore nella generazione del suggerimento',
+        reason: isTimeout ? 'timeout' : 'unknown'
       })
     );
   }

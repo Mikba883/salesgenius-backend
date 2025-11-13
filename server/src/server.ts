@@ -34,6 +34,89 @@ interface UserSession {
 // Cache delle sessioni attive
 const activeSessions = new Map<WebSocket, UserSession>();
 
+// ==========================================
+// RATE LIMITING (In-Memory per MVP)
+// ==========================================
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number; // timestamp
+}
+
+// Rate limit per suggerimenti: max 10 ogni 5 minuti per utente
+const suggestionRateLimits = new Map<string, RateLimitEntry>();
+const SUGGESTION_LIMIT = 10;
+const SUGGESTION_WINDOW_MS = 5 * 60 * 1000; // 5 minuti
+
+// Rate limit per connessioni: max 2 simultanee per utente
+const connectionCounts = new Map<string, number>();
+const MAX_CONNECTIONS_PER_USER = 2;
+
+/**
+ * Verifica se l'utente può generare un nuovo suggerimento
+ */
+function canGenerateSuggestion(userId: string): boolean {
+  const now = Date.now();
+  const limit = suggestionRateLimits.get(userId);
+
+  // Se non esiste o è scaduto, crea nuovo entry
+  if (!limit || now > limit.resetAt) {
+    suggestionRateLimits.set(userId, {
+      count: 1,
+      resetAt: now + SUGGESTION_WINDOW_MS
+    });
+    return true;
+  }
+
+  // Se sotto il limite, incrementa
+  if (limit.count < SUGGESTION_LIMIT) {
+    limit.count++;
+    return true;
+  }
+
+  // Limite raggiunto
+  return false;
+}
+
+/**
+ * Verifica se l'utente può aprire una nuova connessione WebSocket
+ */
+function canOpenConnection(userId: string): boolean {
+  const count = connectionCounts.get(userId) || 0;
+  return count < MAX_CONNECTIONS_PER_USER;
+}
+
+/**
+ * Registra una nuova connessione per l'utente
+ */
+function registerConnection(userId: string): void {
+  const count = connectionCounts.get(userId) || 0;
+  connectionCounts.set(userId, count + 1);
+}
+
+/**
+ * Rimuove una connessione per l'utente
+ */
+function unregisterConnection(userId: string): void {
+  const count = connectionCounts.get(userId) || 0;
+  if (count > 0) {
+    connectionCounts.set(userId, count - 1);
+  }
+}
+
+/**
+ * Cleanup periodico delle rate limit entries scadute (ogni 10 minuti)
+ */
+setInterval(() => {
+  const now = Date.now();
+  for (const [userId, limit] of suggestionRateLimits.entries()) {
+    if (now > limit.resetAt) {
+      suggestionRateLimits.delete(userId);
+    }
+  }
+  console.log(`🧹 Rate limit cleanup: ${suggestionRateLimits.size} active limits`);
+}, 10 * 60 * 1000);
+
 // Inizializza Deepgram
 const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY!);
 
@@ -68,10 +151,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// DEBUG ENDPOINT - Verifica token (TEMPORANEO PER SVILUPPO)
-app.post('/debug-token', async (req, res) => {
-  try {
-    const { token } = req.body;
+// DEBUG ENDPOINT - Verifica token (SOLO IN DEVELOPMENT)
+// ⚠️ DISABILITATO IN PRODUZIONE per sicurezza
+if (process.env.NODE_ENV !== 'production') {
+  app.post('/debug-token', async (req, res) => {
+    try {
+      const { token } = req.body;
     
     if (!token) {
       return res.status(400).json({ error: 'No token provided in request body' });
@@ -140,7 +225,11 @@ app.post('/debug-token', async (req, res) => {
       message: error.message 
     });
   }
-});
+  });
+  console.log('🔍 Debug endpoint /debug-token enabled (development mode)');
+} else {
+  console.log('🔒 Debug endpoint /debug-token disabled (production mode)');
+}
 
 // Endpoint per verificare la configurazione (debug)
 app.get('/status', (req, res) => {
@@ -291,6 +380,21 @@ wss.on('connection', async (ws: WebSocket) => {
                 return;
               }
 
+              // RATE LIMIT: Verifica connessioni simultanee
+              if (!canOpenConnection(authResult.userId)) {
+                console.warn(`⚠️ Rate limit: User ${authResult.userId} exceeded max connections`);
+                ws.send(JSON.stringify({
+                  type: 'rate_limit_exceeded',
+                  reason: 'too_many_connections',
+                  message: `Massimo ${MAX_CONNECTIONS_PER_USER} connessioni simultanee permesse`
+                }));
+                ws.close(1008, 'Too many connections');
+                return;
+              }
+
+              // Registra la connessione
+              registerConnection(authResult.userId);
+
               // Crea la sessione autenticata
               const session: UserSession = {
                 userId: authResult.userId,
@@ -299,7 +403,7 @@ wss.on('connection', async (ws: WebSocket) => {
                 startTime: new Date(),
                 ws
               };
-              
+
               activeSessions.set(ws, session);
               
               console.log(`✅ Premium user session created: ${session.sessionId}`);
@@ -382,12 +486,23 @@ wss.on('connection', async (ws: WebSocket) => {
               // 2. La confidence è alta
               // 3. C'è abbastanza contesto
               const now = Date.now();
-              if (confidence >= 0.7 && 
-                  transcriptBuffer.length > 50 && 
+              if (confidence >= 0.7 &&
+                  transcriptBuffer.length > 50 &&
                   (now - lastSuggestionTime) > SUGGESTION_DEBOUNCE_MS) {
-                
+
                 lastSuggestionTime = now;
-                
+
+                // RATE LIMIT: Verifica se l'utente può generare un nuovo suggerimento
+                if (!canGenerateSuggestion(session.userId)) {
+                  console.warn(`⚠️ Rate limit: User ${session.userId} exceeded suggestion quota`);
+                  ws.send(JSON.stringify({
+                    type: 'rate_limit_exceeded',
+                    reason: 'too_many_suggestions',
+                    message: `Massimo ${SUGGESTION_LIMIT} suggerimenti ogni ${SUGGESTION_WINDOW_MS / 60000} minuti`
+                  }));
+                  return; // Skip this suggestion
+                }
+
                 // Chiama la funzione GPT per generare suggerimenti
                 await handleGPTSuggestion(
                   transcriptBuffer,
@@ -461,10 +576,14 @@ wss.on('connection', async (ws: WebSocket) => {
         console.error('Error logging session end:', error);
       }
     }
-    
+
     // Cleanup
+    if (session) {
+      // De-registra la connessione per rate limiting
+      unregisterConnection(session.userId);
+    }
     activeSessions.delete(ws);
-    
+
     if (deepgramConnection) {
       deepgramConnection.finish();
     }
