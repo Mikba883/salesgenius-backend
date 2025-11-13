@@ -42,6 +42,8 @@ const app = express();
 app.use(express.json()); // Per gestire POST requests con JSON
 const PORT = process.env.PORT || 8080;
 
+console.log('🚀 Server starting with DEBUG LOGGING ENABLED - Version 2.4.2');
+
 // ==========================================
 // HEALTH CHECK ENDPOINTS (FIX PER RENDER)
 // ==========================================
@@ -159,10 +161,11 @@ app.get('/status', (req, res) => {
 });
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 SalesGenius Backend v2.4.1 running on port ${PORT}`);
+  console.log(`🚀 SalesGenius Backend v2.4.2-DEBUG running on port ${PORT}`);
   console.log(`✅ Supabase connected to: ${process.env.SUPABASE_URL}`);
   console.log(`✅ Health check available at: http://localhost:${PORT}/health`);
   console.log(`🔍 Debug token endpoint: http://localhost:${PORT}/debug-token (POST)`);
+  console.log(`⚡ FULL DEBUG LOGGING ACTIVE - Every message will be logged`);
 });
 
 // Setup WebSocket Server
