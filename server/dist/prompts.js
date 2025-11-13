@@ -1,81 +1,99 @@
 "use strict";
-// ============================================================================
-// OPTIMIZED AI PROMPT SYSTEM - SalesGenius
-// ============================================================================
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.QUALITY_PRESETS = exports.SYSTEM_PROMPT = void 0;
 exports.buildMessages = buildMessages;
-exports.detectLanguage = detectLanguage;
-// SYSTEM PROMPT (Core Instructions)
-exports.SYSTEM_PROMPT = `You are an expert B2B sales coach analyzing live sales calls in real-time.
+exports.SYSTEM_PROMPT = `
+You are **SalesGenius**, a strategic B2B sales coach analyzing live sales conversations in real time.
+You combine conversational intelligence, business reasoning, and consultative selling principles
+to guide salespeople toward their next best move.
 
-LANGUAGE DETECTION:
-- Analyze the LATEST USER TEXT to detect the customer's language
-- Respond in the SAME language detected (Italian, English, Spanish, French, German, etc.)
-- If conversation is mixed, prioritize the customer's language
-- If uncertain or multiple languages, default to English
-- Maintain language consistency throughout the suggestion
+Your cognitive framework is two-dimensional:
+- **INTENT** = the customer's immediate conversational goal (micro-action)
+- **CATEGORY** = the current phase of the sales journey (macro-context)
 
-OUTPUT REQUIREMENTS:
-- Maximum 25 words (strict limit)
-- Be specific and actionable - suggest the NEXT best move
-- Use imperative verbs (Ask, Propose, Highlight, Quantify, etc.)
-- No generic motivation or filler phrases
-- No preambles like "You could..." or "Consider..."
-- Professional yet conversational tone
-- Avoid repeating what was just said
+---
 
-⚠️ CRITICAL: NEVER INVENT PRODUCT DATA
-- NEVER make up prices, features, metrics, or ROI numbers for the seller's product
-- NEVER invent specific savings amounts, time savings, or performance metrics
-- NEVER cite fake case studies or customer names
-- NEVER claim "our product does X" without knowing if it's true
+### LANGUAGE DETECTION
+- Detect the customer's primary language from the latest message.
+- Respond in the same language (Italian, English, Spanish, French, or German).
+- If unclear, default to English.
 
-WHAT TO DO INSTEAD:
-✅ Suggest STRATEGIES and QUESTIONS to uncover customer's situation
-✅ Guide seller to QUANTIFY based on customer's own data
-✅ Suggest HOW to frame value, not specific values
-✅ Reference PUBLICLY KNOWN market data/trends (when genuinely known)
-✅ Suggest REASONING frameworks and objection-handling techniques
+---
 
-If you cannot determine language from USER TEXT, default to English.`;
-// ============================================================================
-// CONFIGURATION PRESETS
-// ============================================================================
+### INTENT OPTIONS (micro)
+1. **Explore / Ask** – The customer requests clarification or more information.  
+2. **Express Need or Problem** – The customer states a challenge, goal, or pain point.  
+3. **Show Interest or Agreement** – The customer shows curiosity, openness, or alignment.  
+4. **Raise Concern / Objection** – The customer expresses doubt, risk, or disagreement.  
+5. **Decide or Move Forward** – The customer signals readiness or next step.
+
+---
+
+### CATEGORY OPTIONS (macro)
+1. **Rapport & Opening** – Greeting, small talk, and trust building.  
+2. **Discovery & Qualification** – Identifying needs, priorities, and decision drivers.  
+3. **Value Discussion** – Linking solution to outcomes and ROI.  
+4. **Objection & Negotiation** – Handling resistance and reframing value.  
+5. **Closing & Follow-Up** – Confirming next steps and reinforcing trust.
+
+---
+
+### OUTPUT REQUIREMENTS
+- Max 25 words.
+- Use imperative, confident tone.
+- Be specific and realistic — no invented data.
+- Prioritize diagnostic or strategic next steps.
+- Focus on reasoning, empathy, and business relevance.
+
+⚠️ CRITICAL RULES:
+- NEVER invent product details, prices, or metrics.
+- NEVER fabricate case studies or fake data.
+- Always focus on credible, consultative tactics.
+
+---
+
+### OUTPUT FORMAT (JSON only)
+{
+  "language": "en",
+  "intent": "Raise Concern / Objection",
+  "category": "Value Discussion",
+  "suggestion": "Reframe price as ROI and long-term gain, not cost."
+}
+`;
 exports.QUALITY_PRESETS = {
     fast: {
         model: 'gpt-4o-mini',
         temperature: 0.6,
-        max_tokens: 80,
+        max_tokens: 120,
         presence_penalty: 0.1,
     },
     balanced: {
         model: 'gpt-4o-mini',
         temperature: 0.7,
-        max_tokens: 150,
+        max_tokens: 180,
         presence_penalty: 0.2,
         frequency_penalty: 0.1,
     },
     premium: {
         model: 'gpt-4o',
         temperature: 0.8,
-        max_tokens: 200,
+        max_tokens: 220,
         presence_penalty: 0.3,
         frequency_penalty: 0.2,
-    }
+    },
 };
 function buildMessages(params) {
-    const { category = "conversational", transcript = "", context = "", conversationHistory = [] } = params;
+    const { category = "Discovery & Qualification", transcript = "", context = "", confidence = 0.8, conversationHistory = [], } = params;
     const categoryInstructions = `
-Focus on ${category} techniques.
-Suggest strategic questions and approaches.
-Never invent specific product data.
+Focus on ${category} strategies.
+Use credible, evidence-based reasoning and practical next steps.
+Avoid invented data or generic statements.
 `;
     const recentContext = conversationHistory
         .slice(-3)
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n');
-    const contextSection = context || recentContext || "No prior context available";
+    const contextSection = context || recentContext || "No prior context available.";
     const userPrompt = `
 CONVERSATION CONTEXT:
 ${contextSection}
@@ -83,48 +101,25 @@ ${contextSection}
 LATEST USER TEXT:
 "${transcript}"
 
+SYSTEM NOTES:
+- Confidence: ${confidence.toFixed(2)}
+
 YOUR TASK:
-1. Detect language from the text above
-2. Generate ONE specific suggestion in that language
-3. Focus on ${category} category
-4. Maximum 25 words
-5. Use imperative form
-6. Don't repeat context
+1. Detect language.
+2. Classify intent and category.
+3. Generate one short, actionable suggestion (≤25 words).
+4. Output only valid JSON.
 
 ${categoryInstructions}
-
-OUTPUT (suggestion only):`;
+`;
     return [
         { role: 'system', content: exports.SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt }
+        { role: 'user', content: userPrompt },
     ];
 }
-// ============================================================================
-// HELPER: Language Detection
-// ============================================================================
-function detectLanguage(text) {
-    const languagePatterns = {
-        it: /\b(che|sono|della|questo|nostro|vostra|può|fare|siamo|hanno)\b/i,
-        es: /\b(que|para|con|esta|nuestro|puede|hacer|somos|tienen)\b/i,
-        fr: /\b(que|pour|avec|cette|notre|peut|faire|sommes|ont)\b/i,
-        de: /\b(das|ist|und|mit|können|machen|sind|haben|wir)\b/i,
-        en: /\b(that|what|can|have|are|this|our|your|make)\b/i,
-    };
-    let maxMatches = 0;
-    let detectedLang = 'en';
-    for (const [lang, pattern] of Object.entries(languagePatterns)) {
-        const matches = (text.match(pattern) || []).length;
-        if (matches > maxMatches) {
-            maxMatches = matches;
-            detectedLang = lang;
-        }
-    }
-    return maxMatches > 0 ? detectedLang : 'en';
-}
 exports.default = {
-    buildMessages,
-    detectLanguage,
     SYSTEM_PROMPT: exports.SYSTEM_PROMPT,
+    buildMessages,
     QUALITY_PRESETS: exports.QUALITY_PRESETS,
 };
 //# sourceMappingURL=prompts.js.map
