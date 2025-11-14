@@ -40,13 +40,27 @@ Language detection rules:
 ---
 
 ### CATEGORY OPTIONS (macro)
-You MUST classify each interaction into ONE of these 5 categories:
+You MUST classify each interaction into ONE of these 5 categories based on what the customer is saying:
 
-1. **rapport** – Rapport & Opening: Greeting, small talk, trust building, relationship warmth
-2. **discovery** – Discovery & Qualification: Identifying needs, pain points, priorities, decision drivers, stakeholders
-3. **value** – Value Discussion: Linking solution to outcomes, ROI, business impact, differentiation
-4. **objection** – Objection & Negotiation: Handling resistance, concerns, pricing discussions, reframing value
-5. **closing** – Closing & Follow-Up: Confirming next steps, commitments, agreements, timeline, implementation
+1. **rapport** – Rapport & Opening
+   Use when customer: greets, introduces themselves, makes small talk, discusses weather/sports/non-business topics, builds relationship warmth
+   Examples: "Hi, how are you?", "Great to meet you", "How was your weekend?"
+
+2. **discovery** – Discovery & Qualification
+   Use when customer: describes their situation, explains current processes, mentions challenges/pain points, discusses needs/goals, talks about their team/org
+   Examples: "We're currently struggling with...", "Our process is...", "We need to improve...", "The main challenge is..."
+
+3. **value** – Value Discussion
+   Use when customer: asks about benefits, ROI, business impact, how solution works, competitive advantages, results/outcomes, case studies
+   Examples: "What results can we expect?", "How does this compare to...", "What's the ROI?", "How will this help us..."
+
+4. **objection** – Objection & Negotiation
+   Use when customer: expresses concerns, raises doubts, discusses pricing/budget, mentions risks, compares to competitors, hesitates, asks "what if it doesn't work"
+   Examples: "That's expensive", "We tried something similar before", "What if...", "I'm concerned about...", "We don't have budget"
+
+5. **closing** – Closing & Follow-Up
+   Use when customer: asks about next steps, timelines, implementation, contracts, onboarding, mentions decision makers, shows buying signals
+   Examples: "When can we start?", "What are the next steps?", "I need to discuss with my team", "How long does implementation take?"
 
 **IMPORTANT:** Use ONLY the keyword (rapport/discovery/value/objection/closing) in your JSON output, NOT the full description.
 
@@ -79,33 +93,56 @@ You MUST classify each interaction into ONE of these 5 categories:
 
 ### OUTPUT FORMAT (JSON only)
 
-**English input example:**
+**CATEGORY EXAMPLES - Use these as templates:**
+
+**Example 1 - DISCOVERY** (customer describes challenge):
+Customer: "We're struggling with manual data entry and it's taking too much time"
 {
   "language": "en",
   "intent": "express_need",
-  "category": "value",
-  "suggestion": "Connect the solution to their specific ROI metrics and KPIs they're already tracking. Ask which business outcomes matter most."
+  "category": "discovery",
+  "suggestion": "Quantify the time lost to manual data entry per week. Ask which departments are most affected and what they've already tried to solve this."
 }
 
-**Italian input example:**
+**Example 2 - VALUE** (customer asks about ROI):
+Customer: "What kind of ROI can we expect from this solution?"
 {
-  "language": "it",
-  "intent": "express_need",
+  "language": "en",
+  "intent": "explore",
   "category": "value",
-  "suggestion": "Collega la soluzione al ROI specifico e ai KPI che il cliente monitora già. Chiedi quali risultati contano di più."
+  "suggestion": "Connect ROI to their specific time savings on manual data entry they just mentioned. Ask what their current cost per employee hour is to calculate concrete savings."
 }
 
-**Spanish input example:**
+**Example 3 - OBJECTION** (customer expresses concern):
+Customer: "This seems expensive compared to what we're paying now"
 {
-  "language": "es",
-  "intent": "express_need",
-  "category": "value",
-  "suggestion": "Conecta la solución a sus métricas específicas de ROI y KPIs que ya están rastreando. Pregunta qué resultados importan más."
+  "language": "en",
+  "intent": "raise_objection",
+  "category": "objection",
+  "suggestion": "Reframe by comparing total cost of current manual process including labor hours and errors. Ask what their error rate costs them monthly in rework."
+}
+
+**Example 4 - CLOSING** (customer asks about next steps):
+Customer: "When can we start the implementation?"
+{
+  "language": "en",
+  "intent": "decide",
+  "category": "closing",
+  "suggestion": "Outline clear implementation timeline starting with pilot team they mentioned. Ask if they've identified internal champion to lead rollout and when they can kick off."
+}
+
+**Example 5 - RAPPORT** (customer makes small talk):
+Customer: "Hi, how was your week?"
+{
+  "language": "en",
+  "intent": "explore",
+  "category": "rapport",
+  "suggestion": "Build connection authentically, then transition by asking what their week looked like regarding the challenges they mentioned last time. Keep it conversational."
 }
 
 **CRITICAL RULES:**
 - language: MUST match input language (en/it/es/fr/de)
-- category: MUST be one of: rapport, discovery, value, objection, closing
+- category: MUST be one of: rapport, discovery, value, objection, closing (match to customer's actual words!)
 - intent: MUST be one of: explore, express_need, show_interest, raise_objection, decide
 - suggestion: MUST be 35-40 words in the DETECTED language (same as input)
 `;
@@ -202,12 +239,17 @@ YOUR TASK (step-by-step):
    - What's their emotional state? (curious, concerned, excited, skeptical, ready)
    - What phase of the buying journey? (early exploration, evaluation, decision-making)
 
-3. **CLASSIFY CATEGORY** (choose the ONE most relevant):
-   - rapport: Building relationship, small talk, trust, opening conversation
-   - discovery: Exploring needs, pain points, requirements, qualifying fit
-   - value: Discussing ROI, outcomes, business impact, differentiation
-   - objection: Handling concerns, resistance, pricing, risk management
-   - closing: Moving to commitment, next steps, agreements, implementation
+3. **CLASSIFY CATEGORY** (choose the ONE most relevant by matching customer's words):
+
+   Ask yourself: What is the customer REALLY talking about in their latest message?
+
+   - **rapport**: Are they greeting, building relationship, making small talk? → Use "rapport"
+   - **discovery**: Are they describing challenges, pain points, current situation, needs? → Use "discovery"
+   - **value**: Are they asking about benefits, ROI, results, how it works, comparisons? → Use "value"
+   - **objection**: Are they expressing concerns, doubts, pricing issues, hesitation? → Use "objection"
+   - **closing**: Are they asking about next steps, timelines, implementation, contracts? → Use "closing"
+
+   ⚠️ Don't default to generic categories - match the actual content of what they said!
 
 4. **CLASSIFY INTENT** (customer's immediate goal in their message):
    - explore: Seeking information or clarification

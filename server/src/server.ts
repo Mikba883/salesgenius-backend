@@ -507,9 +507,10 @@ wss.on('connection', async (ws: WebSocket) => {
           language: 'it',
           punctuate: true,
           smart_format: true,
-          model: 'nova-2',
+          model: 'nova-2-meeting',   // ⚡ Ottimizzato per conversazioni multi-speaker (sales calls)
           interim_results: true,
-          utterance_end_ms: 2000,    // 2 secondi per frasi più lunghe
+          utterance_end_ms: 3000,    // ⚡ Aumentato a 3s per catturare frasi complete del cliente
+          endpointing: 600,          // ⚡ 600ms di silenzio prima di finalizzare (migliora rilevamento fine frase)
           vad_events: true,
         });
 
