@@ -30,11 +30,15 @@ Your cognitive framework is two-dimensional:
 ---
 
 ### CATEGORY OPTIONS (macro)
-1. **Rapport & Opening** – Greeting, small talk, and trust building.  
-2. **Discovery & Qualification** – Identifying needs, priorities, and decision drivers.  
-3. **Value Discussion** – Linking solution to outcomes and ROI.  
-4. **Objection & Negotiation** – Handling resistance and reframing value.  
-5. **Closing & Follow-Up** – Confirming next steps and reinforcing trust.
+You MUST classify each interaction into ONE of these 5 categories:
+
+1. **rapport** – Rapport & Opening: Greeting, small talk, trust building, relationship warmth
+2. **discovery** – Discovery & Qualification: Identifying needs, pain points, priorities, decision drivers, stakeholders
+3. **value** – Value Discussion: Linking solution to outcomes, ROI, business impact, differentiation
+4. **objection** – Objection & Negotiation: Handling resistance, concerns, pricing discussions, reframing value
+5. **closing** – Closing & Follow-Up: Confirming next steps, commitments, agreements, timeline, implementation
+
+**IMPORTANT:** Use ONLY the keyword (rapport/discovery/value/objection/closing) in your JSON output, NOT the full description.
 
 ---
 
@@ -58,11 +62,16 @@ Your cognitive framework is two-dimensional:
 
 ### OUTPUT FORMAT (JSON only)
 {
-  "language": "en",
-  "intent": "Raise Concern / Objection",
-  "category": "Value Discussion",
-  "suggestion": "Reframe price as ROI and long-term gain, not cost."
+  "language": "it",
+  "intent": "express_need",
+  "category": "value",
+  "suggestion": "Collega la soluzione al ROI specifico e ai KPI che il cliente monitora già."
 }
+
+**CRITICAL:**
+- category MUST be one of: rapport, discovery, value, objection, closing
+- intent MUST be one of: explore, express_need, show_interest, raise_objection, decide
+- suggestion MUST be 35-40 words in the detected language
 `;
 exports.QUALITY_PRESETS = {
     fast: {
@@ -103,20 +112,39 @@ Avoid invented data or generic statements.
 CONVERSATION CONTEXT (last 6 exchanges):
 ${contextSection}
 
-LATEST USER TEXT:
+LATEST CUSTOMER TEXT (what they just said):
 "${transcript}"
 
-SYSTEM NOTES:
-- Confidence: ${confidence.toFixed(2)}
-- Previous suggestions are in the context above
+ANALYSIS FRAMEWORK:
+- Transcription confidence: ${confidence.toFixed(2)}
+- Previous suggestions: See context above
 
-YOUR TASK:
-1. **ANALYZE** the full conversation context deeply before responding.
-2. **DETECT** the customer's language (Italian, English, etc.).
-3. **CLASSIFY** their intent and the current sales category.
-4. **GENERATE** one strategic, actionable suggestion (35-40 words).
-5. **ENSURE VARIABILITY**: Don't repeat similar advice from recent context.
-6. **OUTPUT** only valid JSON format.
+YOUR TASK (step-by-step):
+1. **UNDERSTAND CUSTOMER STATE**: What is the customer really asking? What's their emotional state? What phase of buying journey are they in?
+
+2. **DETECT LANGUAGE**: Italian, English, Spanish, French, German
+
+3. **CLASSIFY CATEGORY** (choose ONE):
+   - rapport: Building relationship, small talk, trust
+   - discovery: Exploring needs, pain points, requirements
+   - value: Discussing ROI, outcomes, business impact
+   - objection: Handling concerns, resistance, pricing
+   - closing: Moving to commitment, next steps, agreements
+
+4. **CLASSIFY INTENT** (customer's goal):
+   - explore: Seeking information
+   - express_need: Stating a problem/goal
+   - show_interest: Showing openness
+   - raise_objection: Expressing concern
+   - decide: Ready to move forward
+
+5. **CRAFT SUGGESTION** (35-40 words):
+   - Be SPECIFIC to their situation
+   - Use consultative, strategic language
+   - Focus on NEXT BEST ACTION
+   - DON'T repeat previous suggestions
+
+6. **OUTPUT**: Return ONLY valid JSON with exact keywords
 
 ${categoryInstructions}
 `;
