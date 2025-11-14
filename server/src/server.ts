@@ -393,7 +393,79 @@ wss.on('connection', async (ws: WebSocket) => {
             }
             return;
           }
-          
+
+          // Gestione messaggio AUTH (autenticazione post-connessione)
+          if (json.op === 'auth') {
+            console.log('🔐 Auth message received:', { op: json.op, hasJwt: !!json.jwt });
+
+            if (json.jwt) {
+              const authResult = await authenticateUser(json.jwt);
+
+              if (!authResult) {
+                console.error('❌ Authentication failed');
+                ws.send(JSON.stringify({
+                  type: 'auth_failed',
+                  reason: 'Invalid token'
+                }));
+                ws.close(1008, 'Authentication failed');
+                return;
+              }
+
+              if (!authResult.isPremium) {
+                console.log('⚠️ User is not premium');
+                ws.send(JSON.stringify({
+                  type: 'auth_failed',
+                  reason: 'Not premium'
+                }));
+                ws.close(1008, 'Premium required');
+                return;
+              }
+
+              // ⚡ CONTROLLO MAX CONNESSIONI PER UTENTE
+              const currentConnections = userConnections.get(authResult.userId) || 0;
+              if (currentConnections >= MAX_CONNECTIONS_PER_USER) {
+                console.log(`❌ User ${authResult.userId} exceeded max connections (${currentConnections}/${MAX_CONNECTIONS_PER_USER})`);
+                ws.send(JSON.stringify({
+                  type: 'auth_failed',
+                  reason: 'Too many active connections. Close other tabs and try again.'
+                }));
+                ws.close(1008, 'Max connections exceeded');
+                return;
+              }
+
+              // Incrementa contatore connessioni
+              userConnections.set(authResult.userId, currentConnections + 1);
+              currentUserId = authResult.userId;
+
+              // Crea/aggiorna la sessione autenticata
+              const session: UserSession = {
+                userId: authResult.userId,
+                isPremium: authResult.isPremium,
+                sessionId: `session_${Date.now()}_${authResult.userId.substring(0, 8)}`,
+                startTime: new Date(),
+                ws
+              };
+
+              activeSessions.set(ws, session);
+
+              console.log(`✅ Premium user authenticated via auth message: ${session.sessionId} (connections: ${currentConnections + 1}/${MAX_CONNECTIONS_PER_USER})`);
+
+              // Invia conferma autenticazione
+              ws.send(JSON.stringify({
+                type: 'auth_success',
+                sessionId: session.sessionId,
+                isPremium: true
+              }));
+            } else {
+              console.log('⚠️ Auth message without jwt');
+              ws.send(JSON.stringify({
+                type: 'auth_failed',
+                reason: 'No JWT provided'
+              }));
+            }
+            return;
+          }
+
           if (json.op === 'audio') {
             // Header audio, il prossimo messaggio sarà il buffer audio
             console.log('🎧 Audio header received (ignored)');
@@ -427,8 +499,11 @@ wss.on('connection', async (ws: WebSocket) => {
       // Inizializza Deepgram se necessario
       if (!deepgramConnection) {
         console.log('🎤 Initializing Deepgram connection...');
-        
+
         deepgramConnection = deepgramClient.listen.live({
+          encoding: 'linear16',      // PCM16 format
+          sample_rate: 16000,        // 16kHz sample rate
+          channels: 1,               // Mono audio
           language: 'it',
           punctuate: true,
           smart_format: true,
