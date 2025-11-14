@@ -14,7 +14,10 @@ RUN npm ci
 # Copia tutto il codice sorgente
 COPY . .
 
-# Compila TypeScript
+# FORCE: Rimuovi dist/ vecchia per forzare ricompilazione
+RUN rm -rf dist
+
+# Compila TypeScript (sempre da zero)
 RUN npx tsc
 
 # ===============================
