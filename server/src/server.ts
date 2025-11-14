@@ -557,9 +557,12 @@ wss.on('connection', async (ws: WebSocket) => {
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
+          console.log('🎤 Deepgram Transcript event received:', JSON.stringify(data, null, 2));
           const transcript = data.channel?.alternatives[0]?.transcript;
           const isFinal = data.is_final;
           const confidence = data.channel?.alternatives[0]?.confidence || 0;
+
+          console.log(`🔍 Transcript details - Text: "${transcript}", isFinal: ${isFinal}, confidence: ${confidence}`);
 
           if (transcript && transcript.length > 0) {
             console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);
@@ -682,7 +685,7 @@ wss.on('connection', async (ws: WebSocket) => {
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Metadata, (metadata: any) => {
-          console.log('📊 Deepgram metadata:', metadata);
+          console.log('📊 Deepgram metadata:', JSON.stringify(metadata, null, 2));
         });
       }
 

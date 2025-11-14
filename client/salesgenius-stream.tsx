@@ -43,6 +43,7 @@ export default function SalesGeniusStream() {
   const wsRef = useRef<WebSocket | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const dispStreamRef = useRef<MediaStream | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const seqRef = useRef(0);
 
@@ -73,7 +74,7 @@ export default function SalesGeniusStream() {
     try {
       setError(null);
 
-      // 1) Richiedi condivisione schermo + audio
+      // 1) Richiedi condivisione schermo + audio (per catturare altri partecipanti)
       const dispStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: {
@@ -83,17 +84,34 @@ export default function SalesGeniusStream() {
         } as any,
       });
 
-      // Verifica presenza traccia audio
+      dispStreamRef.current = dispStream;
+
+      // 2) Richiedi microfono (per catturare il tuo audio)
+      let micStream: MediaStream | null = null;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+        });
+        micStreamRef.current = micStream;
+        console.log('🎤 Microfono catturato con successo');
+      } catch (micError) {
+        console.warn('⚠️ Impossibile catturare il microfono:', micError);
+        // Continua comunque con solo l'audio della condivisione
+      }
+
+      // Verifica presenza traccia audio dalla condivisione
       const audioTrack = dispStream.getAudioTracks()[0];
-      if (!audioTrack) {
+      if (!audioTrack && !micStream) {
         throw new Error(
-          "Nessuna traccia audio condivisa. Riavvia e spunta 'Condividi audio' nel prompt del browser."
+          "Nessuna traccia audio disponibile. Riavvia e spunta 'Condividi audio' nel prompt del browser."
         );
       }
 
-      dispStreamRef.current = dispStream;
-
-      // 2) Setup AudioContext a 16kHz + AudioWorklet per PCM16
+      // 3) Setup AudioContext a 16kHz + AudioWorklet per PCM16
       const ctx = new AudioContext({ sampleRate: 16000 });
       ctxRef.current = ctx;
 
@@ -121,19 +139,40 @@ export default function SalesGeniusStream() {
       await ctx.audioWorklet.addModule(workletUrl);
       URL.revokeObjectURL(workletUrl);
 
-      // Connessione audio: source -> gain -> worklet
-      const source = ctx.createMediaStreamSource(dispStream);
-      const gain = ctx.createGain();
-      gain.gain.value = 1.0;
-      source.connect(gain);
+      // Crea un mixer per combinare audio schermo + microfono
+      const mixer = ctx.createGain();
+      mixer.gain.value = 1.0;
 
+      // Connetti audio dalla condivisione schermo (se presente)
+      if (audioTrack) {
+        const displaySource = ctx.createMediaStreamSource(dispStream);
+        const displayGain = ctx.createGain();
+        displayGain.gain.value = 1.0; // Volume audio condivisione
+        displaySource.connect(displayGain);
+        displayGain.connect(mixer);
+        console.log('🔊 Audio condivisione schermo connesso');
+      }
+
+      // Connetti audio dal microfono (se presente)
+      if (micStream) {
+        const micSource = ctx.createMediaStreamSource(micStream);
+        const micGain = ctx.createGain();
+        micGain.gain.value = 1.0; // Volume microfono
+        micSource.connect(micGain);
+        micGain.connect(mixer);
+        console.log('🎤 Audio microfono connesso');
+      }
+
+      // Connetti il mixer al worklet per l'encoding PCM16
       const workletNode = new AudioWorkletNode(ctx, 'pcm-worklet', {
         numberOfInputs: 1,
         numberOfOutputs: 0,
         channelCount: 1,
       });
       workletNodeRef.current = workletNode;
-      gain.connect(workletNode);
+      mixer.connect(workletNode);
+
+      console.log('✅ Audio mixer creato - cattura completa attiva!');
 
       // 3) Connessione WebSocket
       setConnectionStatus('connecting');
@@ -222,6 +261,7 @@ export default function SalesGeniusStream() {
       workletNodeRef.current?.disconnect();
       ctxRef.current?.close();
       dispStreamRef.current?.getTracks().forEach(t => t.stop());
+      micStreamRef.current?.getTracks().forEach(t => t.stop());
 
       // Cleanup WebSocket
       if (wsRef.current) {
@@ -233,6 +273,7 @@ export default function SalesGeniusStream() {
       workletNodeRef.current = null;
       ctxRef.current = null;
       dispStreamRef.current = null;
+      micStreamRef.current = null;
       wsRef.current = null;
       seqRef.current = 0;
 
@@ -382,9 +423,9 @@ export default function SalesGeniusStream() {
               <strong>💡 Suggerimento:</strong> Quando clicchi "Avvia Condivisione":
             </p>
             <ul className="mt-2 text-sm text-blue-200 space-y-1 list-disc list-inside">
-              <li><strong>Windows/Chrome:</strong> Seleziona "Schermo intero" e spunta "Condividi audio"</li>
-              <li><strong>macOS:</strong> Seleziona "Scheda di Chrome" e spunta "Condividi audio scheda"</li>
-              <li>Per Google Meet/Zoom: condividi la scheda del browser con l'audio</li>
+              <li><strong>1° Permesso - Condivisione Schermo:</strong> Seleziona la scheda con Google Meet/Zoom e spunta "Condividi audio scheda" (cattura audio altri partecipanti)</li>
+              <li><strong>2° Permesso - Microfono:</strong> Autorizza l'accesso al microfono (cattura il tuo audio)</li>
+              <li>✅ Entrambi gli audio verranno mixati e analizzati in tempo reale!</li>
             </ul>
           </div>
         )}
