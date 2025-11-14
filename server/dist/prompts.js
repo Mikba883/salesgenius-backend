@@ -39,16 +39,20 @@ Your cognitive framework is two-dimensional:
 ---
 
 ### OUTPUT REQUIREMENTS
-- Max 25 words.
-- Use imperative, confident tone.
+- Max 35-40 words for depth and nuance.
+- Use imperative, confident, consultative tone.
 - Be specific and realistic — no invented data.
 - Prioritize diagnostic or strategic next steps.
 - Focus on reasoning, empathy, and business relevance.
+- **VARY your suggestions**: avoid repetitive patterns, explore different angles.
+- **THINK DEEPLY**: analyze context before suggesting, don't rush.
 
 ⚠️ CRITICAL RULES:
 - NEVER invent product details, prices, or metrics.
 - NEVER fabricate case studies or fake data.
+- NEVER repeat similar suggestions from recent history.
 - Always focus on credible, consultative tactics.
+- Each suggestion should offer unique strategic value.
 
 ---
 
@@ -63,23 +67,24 @@ Your cognitive framework is two-dimensional:
 exports.QUALITY_PRESETS = {
     fast: {
         model: 'gpt-4o-mini',
-        temperature: 0.6,
-        max_tokens: 120,
-        presence_penalty: 0.1,
+        temperature: 0.7,
+        max_tokens: 200,
+        presence_penalty: 0.3,
+        frequency_penalty: 0.3,
     },
     balanced: {
         model: 'gpt-4o-mini',
-        temperature: 0.7,
-        max_tokens: 180,
-        presence_penalty: 0.2,
-        frequency_penalty: 0.1,
+        temperature: 0.8,
+        max_tokens: 250,
+        presence_penalty: 0.4,
+        frequency_penalty: 0.4,
     },
     premium: {
         model: 'gpt-4o',
-        temperature: 0.8,
-        max_tokens: 220,
-        presence_penalty: 0.3,
-        frequency_penalty: 0.2,
+        temperature: 0.9,
+        max_tokens: 300,
+        presence_penalty: 0.5,
+        frequency_penalty: 0.5,
     },
 };
 function buildMessages(params) {
@@ -90,12 +95,12 @@ Use credible, evidence-based reasoning and practical next steps.
 Avoid invented data or generic statements.
 `;
     const recentContext = conversationHistory
-        .slice(-3)
+        .slice(-6)
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n');
     const contextSection = context || recentContext || "No prior context available.";
     const userPrompt = `
-CONVERSATION CONTEXT:
+CONVERSATION CONTEXT (last 6 exchanges):
 ${contextSection}
 
 LATEST USER TEXT:
@@ -103,12 +108,15 @@ LATEST USER TEXT:
 
 SYSTEM NOTES:
 - Confidence: ${confidence.toFixed(2)}
+- Previous suggestions are in the context above
 
 YOUR TASK:
-1. Detect language.
-2. Classify intent and category.
-3. Generate one short, actionable suggestion (≤25 words).
-4. Output only valid JSON.
+1. **ANALYZE** the full conversation context deeply before responding.
+2. **DETECT** the customer's language (Italian, English, etc.).
+3. **CLASSIFY** their intent and the current sales category.
+4. **GENERATE** one strategic, actionable suggestion (35-40 words).
+5. **ENSURE VARIABILITY**: Don't repeat similar advice from recent context.
+6. **OUTPUT** only valid JSON format.
 
 ${categoryInstructions}
 `;

@@ -296,7 +296,7 @@ wss.on('connection', async (ws: WebSocket) => {
   let audioPacketsSent = 0; // Contatore pacchetti inviati a Deepgram
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 3000; // Almeno 3 secondi tra suggerimenti
+  const SUGGESTION_DEBOUNCE_MS = 15000; // 15 secondi tra suggerimenti (era 3s - troppo frequente)
   let currentUserId: string | null = null; // Traccia userId per rate limiting
 
   ws.on('message', async (message: Buffer) => {
@@ -509,7 +509,7 @@ wss.on('connection', async (ws: WebSocket) => {
           smart_format: true,
           model: 'nova-2',
           interim_results: true,
-          utterance_end_ms: 1000,
+          utterance_end_ms: 2000,    // 2 secondi per frasi più lunghe
           vad_events: true,
         });
 
@@ -538,20 +538,27 @@ wss.on('connection', async (ws: WebSocket) => {
           const confidence = data.channel?.alternatives[0]?.confidence || 0;
 
           if (transcript && transcript.length > 0) {
-            console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript}`);
-            
+            console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);
+
             if (isFinal) {
               transcriptBuffer += ' ' + transcript;
-              
+              console.log(`📊 Buffer length: ${transcriptBuffer.length} chars`);
+
               // Genera suggerimento solo se:
               // 1. È passato abbastanza tempo dall'ultimo
               // 2. La confidence è alta
               // 3. C'è abbastanza contesto
               // 4. ⚡ NON ha superato il rate limit
               const now = Date.now();
-              if (confidence >= 0.7 &&
-                  transcriptBuffer.length > 50 &&
-                  (now - lastSuggestionTime) > SUGGESTION_DEBOUNCE_MS) {
+              const timeSinceLastSuggestion = now - lastSuggestionTime;
+
+              console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)}, bufferLen=${transcriptBuffer.length}, timeSince=${timeSinceLastSuggestion}ms, debounce=${SUGGESTION_DEBOUNCE_MS}ms`);
+
+              if (confidence >= 0.75 &&
+                  transcriptBuffer.length > 150 &&
+                  timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS) {
+
+                console.log('✅ Conditions met, generating suggestion...');
 
                 // ⚡ CONTROLLO RATE LIMIT SUGGERIMENTI
                 if (session.userId !== 'demo-user') {
@@ -607,6 +614,13 @@ wss.on('connection', async (ws: WebSocket) => {
                 if (transcriptBuffer.length > 1000) {
                   transcriptBuffer = transcriptBuffer.slice(-800);
                 }
+              } else {
+                // Log del motivo per cui il suggerimento NON viene generato
+                const reasons = [];
+                if (confidence < 0.75) reasons.push(`confidence too low (${confidence.toFixed(2)} < 0.75)`);
+                if (transcriptBuffer.length <= 150) reasons.push(`buffer too short (${transcriptBuffer.length} <= 150)`);
+                if (timeSinceLastSuggestion <= SUGGESTION_DEBOUNCE_MS) reasons.push(`debounce not elapsed (${timeSinceLastSuggestion}ms <= ${SUGGESTION_DEBOUNCE_MS}ms)`);
+                console.log(`⏸️ Suggestion skipped: ${reasons.join(', ')}`);
               }
             }
           }
