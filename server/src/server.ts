@@ -296,7 +296,7 @@ wss.on('connection', async (ws: WebSocket) => {
   let audioPacketsSent = 0; // Contatore pacchetti inviati a Deepgram
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 15000; // 15 secondi tra suggerimenti (era 3s - troppo frequente)
+  const SUGGESTION_DEBOUNCE_MS = 10000; // 10 secondi - bilanciato tra qualità e frequenza
   let currentUserId: string | null = null; // Traccia userId per rate limiting
 
   ws.on('message', async (message: Buffer) => {
@@ -554,8 +554,8 @@ wss.on('connection', async (ws: WebSocket) => {
 
               console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)}, bufferLen=${transcriptBuffer.length}, timeSince=${timeSinceLastSuggestion}ms, debounce=${SUGGESTION_DEBOUNCE_MS}ms`);
 
-              if (confidence >= 0.75 &&
-                  transcriptBuffer.length > 150 &&
+              if (confidence >= 0.65 &&
+                  transcriptBuffer.length > 80 &&
                   timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS) {
 
                 console.log('✅ Conditions met, generating suggestion...');
@@ -617,8 +617,8 @@ wss.on('connection', async (ws: WebSocket) => {
               } else {
                 // Log del motivo per cui il suggerimento NON viene generato
                 const reasons = [];
-                if (confidence < 0.75) reasons.push(`confidence too low (${confidence.toFixed(2)} < 0.75)`);
-                if (transcriptBuffer.length <= 150) reasons.push(`buffer too short (${transcriptBuffer.length} <= 150)`);
+                if (confidence < 0.65) reasons.push(`confidence too low (${confidence.toFixed(2)} < 0.65)`);
+                if (transcriptBuffer.length <= 80) reasons.push(`buffer too short (${transcriptBuffer.length} <= 80)`);
                 if (timeSinceLastSuggestion <= SUGGESTION_DEBOUNCE_MS) reasons.push(`debounce not elapsed (${timeSinceLastSuggestion}ms <= ${SUGGESTION_DEBOUNCE_MS}ms)`);
                 console.log(`⏸️ Suggestion skipped: ${reasons.join(', ')}`);
               }
