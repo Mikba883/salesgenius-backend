@@ -377,9 +377,10 @@ wss.on('connection', async (ws) => {
                     language: 'it',
                     punctuate: true,
                     smart_format: true,
-                    model: 'nova-2',
+                    model: 'nova-2-meeting',
                     interim_results: true,
-                    utterance_end_ms: 2000,
+                    utterance_end_ms: 3000,
+                    endpointing: 600,
                     vad_events: true,
                 });
                 deepgramConnection.on(sdk_1.LiveTranscriptionEvents.Open, () => {
