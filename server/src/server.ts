@@ -509,7 +509,7 @@ wss.on('connection', async (ws: WebSocket) => {
           smart_format: true,
           model: 'nova-2',
           interim_results: true,
-          utterance_end_ms: 1000,
+          utterance_end_ms: 2000,    // 2 secondi per frasi più lunghe
           vad_events: true,
         });
 
@@ -538,19 +538,20 @@ wss.on('connection', async (ws: WebSocket) => {
           const confidence = data.channel?.alternatives[0]?.confidence || 0;
 
           if (transcript && transcript.length > 0) {
-            console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript}`);
-            
+            console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);
+
             if (isFinal) {
               transcriptBuffer += ' ' + transcript;
-              
+              console.log(`📊 Buffer length: ${transcriptBuffer.length} chars`);
+
               // Genera suggerimento solo se:
               // 1. È passato abbastanza tempo dall'ultimo
               // 2. La confidence è alta
               // 3. C'è abbastanza contesto
               // 4. ⚡ NON ha superato il rate limit
               const now = Date.now();
-              if (confidence >= 0.7 &&
-                  transcriptBuffer.length > 50 &&
+              if (confidence >= 0.6 &&
+                  transcriptBuffer.length > 20 &&
                   (now - lastSuggestionTime) > SUGGESTION_DEBOUNCE_MS) {
 
                 // ⚡ CONTROLLO RATE LIMIT SUGGERIMENTI
