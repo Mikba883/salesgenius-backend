@@ -1,0 +1,31 @@
+# Node modules
+node_modules
+npm-debug.log
+
+# Build output - FORCE REBUILD
+dist
+
+# Development files
+*.md
+.git
+.gitignore
+
+# Test files  
+test
+**/*.test.ts
+**/*.spec.ts
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
