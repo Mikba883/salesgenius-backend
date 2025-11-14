@@ -115,19 +115,70 @@ export default function SalesGeniusStream() {
       const ctx = new AudioContext({ sampleRate: 16000 });
       ctxRef.current = ctx;
 
-      // Worklet inline per conversione PCM16
+      // Worklet inline per conversione PCM16 con supporto stereo
       const workletCode = `
         class PCMWorklet extends AudioWorkletProcessor {
+          constructor() {
+            super();
+            this.frameCount = 0;
+            this.hasAudio = false;
+          }
+
           process(inputs) {
             const input = inputs[0];
-            if (!input || !input[0]) return true;
+            if (!input || input.length === 0) return true;
+
+            // Verifica se abbiamo almeno un canale
             const ch0 = input[0];
-            const pcm = new Int16Array(ch0.length);
-            for (let i = 0; i < ch0.length; i++) {
-              let s = Math.max(-1, Math.min(1, ch0[i]));
-              pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            if (!ch0 || ch0.length === 0) return true;
+
+            // Se l'input è stereo, fai il downmix a mono (media dei due canali)
+            const numChannels = input.length;
+            const samples = ch0.length;
+            const mono = new Float32Array(samples);
+
+            if (numChannels === 1) {
+              // Input mono: copia direttamente
+              mono.set(ch0);
+            } else {
+              // Input stereo o multi-canale: fai la media di tutti i canali
+              for (let i = 0; i < samples; i++) {
+                let sum = 0;
+                for (let ch = 0; ch < numChannels && ch < input.length; ch++) {
+                  if (input[ch] && input[ch][i] !== undefined) {
+                    sum += input[ch][i];
+                  }
+                }
+                mono[i] = sum / numChannels;
+              }
             }
-            this.port.postMessage(pcm);
+
+            // Converti in PCM16
+            const pcm = new Int16Array(samples);
+            let maxSample = 0;
+            for (let i = 0; i < samples; i++) {
+              let s = Math.max(-1, Math.min(1, mono[i]));
+              pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              maxSample = Math.max(maxSample, Math.abs(s));
+            }
+
+            // Log periodico per debug (ogni 100 frame ~ 3 secondi)
+            this.frameCount++;
+            if (maxSample > 0.01) this.hasAudio = true;
+
+            if (this.frameCount % 100 === 0) {
+              this.port.postMessage({
+                type: 'debug',
+                frameCount: this.frameCount,
+                channels: numChannels,
+                samples: samples,
+                maxSample: maxSample.toFixed(4),
+                hasAudio: this.hasAudio
+              });
+            }
+
+            // Invia i dati audio
+            this.port.postMessage({ type: 'audio', data: pcm });
             return true;
           }
         }
@@ -141,33 +192,38 @@ export default function SalesGeniusStream() {
 
       // Crea un mixer per combinare audio schermo + microfono
       const mixer = ctx.createGain();
-      mixer.gain.value = 1.0;
+      mixer.gain.value = 1.5; // Aumentato leggermente per compensare il mixing
 
       // Connetti audio dalla condivisione schermo (se presente)
       if (audioTrack) {
         const displaySource = ctx.createMediaStreamSource(dispStream);
         const displayGain = ctx.createGain();
-        displayGain.gain.value = 1.0; // Volume audio condivisione
+        displayGain.gain.value = 1.2; // Volume audio condivisione leggermente aumentato
         displaySource.connect(displayGain);
         displayGain.connect(mixer);
         console.log('🔊 Audio condivisione schermo connesso');
+        console.log(`   - Canali: ${displaySource.channelCount}`);
+        console.log(`   - Sample rate: ${ctx.sampleRate}Hz`);
       }
 
       // Connetti audio dal microfono (se presente)
       if (micStream) {
         const micSource = ctx.createMediaStreamSource(micStream);
         const micGain = ctx.createGain();
-        micGain.gain.value = 1.0; // Volume microfono
+        micGain.gain.value = 1.2; // Volume microfono leggermente aumentato
         micSource.connect(micGain);
         micGain.connect(mixer);
         console.log('🎤 Audio microfono connesso');
+        console.log(`   - Canali: ${micSource.channelCount}`);
       }
 
       // Connetti il mixer al worklet per l'encoding PCM16
       const workletNode = new AudioWorkletNode(ctx, 'pcm-worklet', {
         numberOfInputs: 1,
         numberOfOutputs: 0,
-        channelCount: 1,
+        channelCount: 2, // Accetta input stereo
+        channelCountMode: 'max', // Usa il massimo numero di canali disponibili
+        channelInterpretation: 'speakers', // Interpreta come speakers (stereo)
       });
       workletNodeRef.current = workletNode;
       mixer.connect(workletNode);
@@ -226,21 +282,32 @@ export default function SalesGeniusStream() {
 
       // 4) Stream PCM16 continuo
       workletNode.port.onmessage = (e) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        const msg = e.data;
 
-        const pcm = e.data as Int16Array;
+        // Gestisci messaggi di debug dal worklet
+        if (msg.type === 'debug') {
+          console.log(`🎵 Worklet Debug - Frame: ${msg.frameCount}, Canali: ${msg.channels}, Max: ${msg.maxSample}, HasAudio: ${msg.hasAudio}`);
+          return;
+        }
 
-        // Header JSON
-        wsRef.current.send(JSON.stringify({
-          op: "audio",
-          seq: seqRef.current++,
-          sr: 16000,
-          ch: 1,
-          samples: pcm.length,
-        }));
+        // Gestisci dati audio
+        if (msg.type === 'audio') {
+          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-        // Frame binario
-        wsRef.current.send(pcm.buffer);
+          const pcm = msg.data as Int16Array;
+
+          // Header JSON
+          wsRef.current.send(JSON.stringify({
+            op: "audio",
+            seq: seqRef.current++,
+            sr: 16000,
+            ch: 1,
+            samples: pcm.length,
+          }));
+
+          // Frame binario
+          wsRef.current.send(pcm.buffer);
+        }
       };
 
       // 5) Cleanup automatico quando l'utente ferma la condivisione
