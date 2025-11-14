@@ -366,13 +366,16 @@ wss.on('connection', async (ws: WebSocket) => {
               activeSessions.set(ws, session);
 
               console.log(`✅ Premium user session created: ${session.sessionId} (connections: ${currentConnections + 1}/${MAX_CONNECTIONS_PER_USER})`);
-              
+
               // Invia messaggio di conferma - IMPORTANTE: backend pronto
-              ws.send(JSON.stringify({
+              const readyMessage = {
                 type: 'capture_ready', // Questo messaggio fa partire l'audio nell'extension
                 sessionId: session.sessionId,
                 isPremium: true
-              }));
+              };
+              console.log('📤 Sending capture_ready message to client:', readyMessage);
+              ws.send(JSON.stringify(readyMessage));
+              console.log('✅ capture_ready message sent successfully');
             } else {
               // Nessun token - modalità demo (per test)
               console.log('⚠️ No token provided - demo mode');
@@ -710,8 +713,17 @@ wss.on('connection', async (ws: WebSocket) => {
     }
   });
 
-  ws.on('close', async () => {
+  ws.on('close', async (code: number, reason: Buffer) => {
+    const reasonStr = reason.toString() || 'No reason provided';
     console.log('👋 WebSocket connection closed');
+    console.log(`   - Close code: ${code}`);
+    console.log(`   - Close reason: ${reasonStr}`);
+    console.log(`   - Had session: ${activeSessions.has(ws)}`);
+    if (activeSessions.has(ws)) {
+      const session = activeSessions.get(ws)!;
+      const duration = (Date.now() - session.startTime.getTime()) / 1000;
+      console.log(`   - Session duration: ${duration.toFixed(2)}s`);
+    }
 
     // ⚡ DECREMENTA CONTATORE CONNESSIONI
     if (currentUserId) {
@@ -757,8 +769,13 @@ wss.on('connection', async (ws: WebSocket) => {
     }
   });
 
-  ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
+  ws.on('error', (error: Error) => {
+    console.error('❌ WebSocket error occurred:');
+    console.error('   - Type:', typeof error);
+    console.error('   - Name:', error?.name);
+    console.error('   - Message:', error?.message);
+    console.error('   - Stack:', error?.stack);
+    console.error('   - Full error:', error);
   });
 });
 

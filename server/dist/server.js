@@ -264,11 +264,14 @@ wss.on('connection', async (ws) => {
                             };
                             activeSessions.set(ws, session);
                             console.log(`✅ Premium user session created: ${session.sessionId} (connections: ${currentConnections + 1}/${MAX_CONNECTIONS_PER_USER})`);
-                            ws.send(JSON.stringify({
+                            const readyMessage = {
                                 type: 'capture_ready',
                                 sessionId: session.sessionId,
                                 isPremium: true
-                            }));
+                            };
+                            console.log('📤 Sending capture_ready message to client:', readyMessage);
+                            ws.send(JSON.stringify(readyMessage));
+                            console.log('✅ capture_ready message sent successfully');
                         }
                         else {
                             console.log('⚠️ No token provided - demo mode');
@@ -532,8 +535,17 @@ wss.on('connection', async (ws) => {
             console.error('Error processing message:', error);
         }
     });
-    ws.on('close', async () => {
+    ws.on('close', async (code, reason) => {
+        const reasonStr = reason.toString() || 'No reason provided';
         console.log('👋 WebSocket connection closed');
+        console.log(`   - Close code: ${code}`);
+        console.log(`   - Close reason: ${reasonStr}`);
+        console.log(`   - Had session: ${activeSessions.has(ws)}`);
+        if (activeSessions.has(ws)) {
+            const session = activeSessions.get(ws);
+            const duration = (Date.now() - session.startTime.getTime()) / 1000;
+            console.log(`   - Session duration: ${duration.toFixed(2)}s`);
+        }
         if (currentUserId) {
             const connections = userConnections.get(currentUserId) || 0;
             if (connections > 0) {
@@ -572,7 +584,12 @@ wss.on('connection', async (ws) => {
         }
     });
     ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        console.error('❌ WebSocket error occurred:');
+        console.error('   - Type:', typeof error);
+        console.error('   - Name:', error?.name);
+        console.error('   - Message:', error?.message);
+        console.error('   - Stack:', error?.stack);
+        console.error('   - Full error:', error);
     });
 });
 let isShuttingDown = false;
