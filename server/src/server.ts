@@ -500,19 +500,42 @@ wss.on('connection', async (ws: WebSocket) => {
       if (!deepgramConnection) {
         console.log('🎤 Initializing Deepgram connection...');
 
-        deepgramConnection = deepgramClient.listen.live({
-          encoding: 'linear16',      // PCM16 format
-          sample_rate: 16000,        // 16kHz sample rate
-          channels: 1,               // Mono audio
-          language: 'it',
-          punctuate: true,
-          smart_format: true,
-          model: 'nova-2-meeting',   // ⚡ Ottimizzato per conversazioni multi-speaker (sales calls)
-          interim_results: true,
-          utterance_end_ms: 3000,    // ⚡ Aumentato a 3s per catturare frasi complete del cliente
-          endpointing: 600,          // ⚡ 600ms di silenzio prima di finalizzare (migliora rilevamento fine frase)
-          vad_events: true,
-        });
+        // Verifica che l'API key esista
+        if (!process.env.DEEPGRAM_API_KEY) {
+          console.error('❌ CRITICAL: DEEPGRAM_API_KEY is not set!');
+          ws.send(JSON.stringify({
+            type: 'transcription_error',
+            error: 'Server configuration error. Please contact support.'
+          }));
+          return;
+        }
+
+        console.log(`🔑 Using Deepgram API key: ${process.env.DEEPGRAM_API_KEY.substring(0, 8)}...`);
+
+        try {
+          deepgramConnection = deepgramClient.listen.live({
+            encoding: 'linear16',      // PCM16 format
+            sample_rate: 16000,        // 16kHz sample rate
+            channels: 1,               // Mono audio
+            language: 'it',
+            punctuate: true,
+            smart_format: true,
+            model: 'nova-2-meeting',   // ⚡ Ottimizzato per conversazioni multi-speaker (sales calls)
+            interim_results: true,
+            utterance_end_ms: 3000,    // ⚡ Aumentato a 3s per catturare frasi complete del cliente
+            endpointing: 600,          // ⚡ 600ms di silenzio prima di finalizzare (migliora rilevamento fine frase)
+            vad_events: true,
+          });
+
+          console.log('✅ Deepgram connection object created successfully');
+        } catch (initError: any) {
+          console.error('❌ CRITICAL: Failed to create Deepgram connection:', initError);
+          ws.send(JSON.stringify({
+            type: 'transcription_error',
+            error: 'Failed to initialize audio transcription service.'
+          }));
+          return;
+        }
 
         // Gestione eventi Deepgram
         deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
@@ -628,7 +651,24 @@ wss.on('connection', async (ws: WebSocket) => {
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Error, (error: any) => {
-          console.error('❌ Deepgram error:', JSON.stringify(error, null, 2));
+          console.error('❌ Deepgram error details:');
+          console.error('   - Type:', typeof error);
+          console.error('   - Constructor:', error?.constructor?.name);
+          console.error('   - Message:', error?.message || 'No message');
+          console.error('   - Code:', error?.code);
+          console.error('   - Stack:', error?.stack);
+          console.error('   - Full object:', error);
+
+          // Invia notifica al client
+          try {
+            ws.send(JSON.stringify({
+              type: 'transcription_error',
+              error: 'Audio transcription service error. Please check your connection and try again.',
+              details: error?.message || 'Unknown error'
+            }));
+          } catch (sendError) {
+            console.error('Failed to notify client of Deepgram error:', sendError);
+          }
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Close, (closeEvent: any) => {
