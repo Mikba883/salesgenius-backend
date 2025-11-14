@@ -72,7 +72,7 @@ type SuggestionIntent =
 const recentSuggestions = new Set<string>();
 const CACHE_DURATION_MS = 30000; // 30 sec
 const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-const MAX_HISTORY = 5;
+const MAX_HISTORY = 10;  // Aumentato da 5 a 10 per più contesto
 
 // ============================================================================
 // 🧠 handleGPTSuggestion()

@@ -213,7 +213,7 @@ wss.on('connection', async (ws) => {
     let audioPacketsSent = 0;
     let transcriptBuffer = '';
     let lastSuggestionTime = 0;
-    const SUGGESTION_DEBOUNCE_MS = 3000;
+    const SUGGESTION_DEBOUNCE_MS = 15000;
     let currentUserId = null;
     ws.on('message', async (message) => {
         console.log(`📨 RAW MESSAGE: ${message.length} bytes, isBuffer: ${Buffer.isBuffer(message)}`);
@@ -409,8 +409,8 @@ wss.on('connection', async (ws) => {
                             const now = Date.now();
                             const timeSinceLastSuggestion = now - lastSuggestionTime;
                             console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)}, bufferLen=${transcriptBuffer.length}, timeSince=${timeSinceLastSuggestion}ms, debounce=${SUGGESTION_DEBOUNCE_MS}ms`);
-                            if (confidence >= 0.6 &&
-                                transcriptBuffer.length > 20 &&
+                            if (confidence >= 0.75 &&
+                                transcriptBuffer.length > 150 &&
                                 timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS) {
                                 console.log('✅ Conditions met, generating suggestion...');
                                 if (session.userId !== 'demo-user') {
@@ -447,10 +447,10 @@ wss.on('connection', async (ws) => {
                             }
                             else {
                                 const reasons = [];
-                                if (confidence < 0.6)
-                                    reasons.push(`confidence too low (${confidence.toFixed(2)} < 0.6)`);
-                                if (transcriptBuffer.length <= 20)
-                                    reasons.push(`buffer too short (${transcriptBuffer.length} <= 20)`);
+                                if (confidence < 0.75)
+                                    reasons.push(`confidence too low (${confidence.toFixed(2)} < 0.75)`);
+                                if (transcriptBuffer.length <= 150)
+                                    reasons.push(`buffer too short (${transcriptBuffer.length} <= 150)`);
                                 if (timeSinceLastSuggestion <= SUGGESTION_DEBOUNCE_MS)
                                     reasons.push(`debounce not elapsed (${timeSinceLastSuggestion}ms <= ${SUGGESTION_DEBOUNCE_MS}ms)`);
                                 console.log(`⏸️ Suggestion skipped: ${reasons.join(', ')}`);

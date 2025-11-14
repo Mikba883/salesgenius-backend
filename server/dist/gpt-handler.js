@@ -23,7 +23,7 @@ const CATEGORY_EMOJI = {
 const recentSuggestions = new Set();
 const CACHE_DURATION_MS = 30000;
 const conversationHistory = [];
-const MAX_HISTORY = 5;
+const MAX_HISTORY = 10;
 async function handleGPTSuggestion(transcript, ws, onSuggestionGenerated) {
     console.log(`💬 Generating suggestion for transcript: "${transcript.substring(0, 100)}..."`);
     try {
