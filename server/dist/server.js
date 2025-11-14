@@ -18,7 +18,7 @@ const deepgramClient = (0, sdk_1.createClient)(process.env.DEEPGRAM_API_KEY);
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 const PORT = process.env.PORT || 8080;
-console.log('🚀 Server starting with DEBUG LOGGING ENABLED - Version 2.4.2');
+console.log('🚀 Server starting with DEBUG LOGGING ENABLED - Version 2.4.3 - Force Rebuild');
 const apiLimiter = (0, express_rate_limit_1.default)({
     windowMs: 5 * 60 * 1000,
     max: 100,
@@ -40,7 +40,7 @@ app.get('/', (req, res) => {
     res.status(200).json({
         status: 'ok',
         service: 'salesgenius-backend',
-        version: '2.4.1',
+        version: '2.4.3',
         uptime: Math.floor(process.uptime()),
         connections: activeSessions.size,
         timestamp: new Date().toISOString()
@@ -129,7 +129,7 @@ app.post('/debug-token', debugLimiter, async (req, res) => {
 app.get('/status', (req, res) => {
     res.status(200).json({
         service: 'salesgenius-backend',
-        version: '2.4.1',
+        version: '2.4.3',
         environment: process.env.NODE_ENV || 'development',
         supabaseConnected: !!process.env.SUPABASE_URL,
         deepgramConnected: !!process.env.DEEPGRAM_API_KEY,
@@ -141,7 +141,7 @@ app.get('/status', (req, res) => {
     });
 });
 const server = app.listen(PORT, () => {
-    console.log(`🚀 SalesGenius Backend v2.4.2-DEBUG running on port ${PORT}`);
+    console.log(`🚀 SalesGenius Backend v2.4.3-DEBUG running on port ${PORT}`);
     console.log(`✅ Supabase connected to: ${process.env.SUPABASE_URL}`);
     console.log(`✅ Health check available at: http://localhost:${PORT}/health`);
     console.log(`🔍 Debug token endpoint: http://localhost:${PORT}/debug-token (POST)`);
