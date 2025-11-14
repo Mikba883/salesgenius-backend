@@ -387,7 +387,7 @@ wss.on('connection', async (ws) => {
                         language: 'it',
                         punctuate: true,
                         smart_format: true,
-                        model: 'nova-2-meeting',
+                        model: 'nova-2',
                         interim_results: true,
                         utterance_end_ms: 3000,
                         endpointing: 600,
