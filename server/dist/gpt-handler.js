@@ -25,6 +25,7 @@ const CACHE_DURATION_MS = 30000;
 const conversationHistory = [];
 const MAX_HISTORY = 5;
 async function handleGPTSuggestion(transcript, ws, onSuggestionGenerated) {
+    console.log(`💬 Generating suggestion for transcript: "${transcript.substring(0, 100)}..."`);
     try {
         const messages = (0, prompts_1.buildMessages)({
             transcript,
@@ -35,6 +36,7 @@ async function handleGPTSuggestion(transcript, ws, onSuggestionGenerated) {
         const qualitySettings = prompts_1.QUALITY_PRESETS[qualityMode] || prompts_1.QUALITY_PRESETS.balanced;
         const suggestionId = `s-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const GPT_TIMEOUT_MS = 8000;
+        console.log(`🔄 Calling OpenAI API (model: ${qualitySettings.model}, timeout: ${GPT_TIMEOUT_MS}ms)...`);
         const completion = await Promise.race([
             openai.chat.completions.create({
                 model: qualitySettings.model,
@@ -47,13 +49,14 @@ async function handleGPTSuggestion(transcript, ws, onSuggestionGenerated) {
             }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('OpenAI request timeout')), GPT_TIMEOUT_MS))
         ]);
+        console.log(`✅ OpenAI API response received`);
         const responseText = completion.choices[0]?.message?.content || '{}';
         let parsedResponse;
         try {
             parsedResponse = JSON.parse(responseText);
         }
         catch (e) {
-            console.error('Failed to parse GPT response:', responseText);
+            console.error('❌ Failed to parse GPT response:', responseText);
             throw new Error('Invalid response format from GPT');
         }
         const category = parsedResponse.category?.toLowerCase() || 'discovery';
@@ -105,7 +108,18 @@ async function handleGPTSuggestion(transcript, ws, onSuggestionGenerated) {
             await onSuggestionGenerated(category, suggestion);
     }
     catch (error) {
-        console.error('Error generating GPT suggestion:', error);
+        if (error.message === 'OpenAI request timeout') {
+            console.error('⏱️ OpenAI API timeout after 8 seconds');
+        }
+        else if (error.code === 'insufficient_quota') {
+            console.error('💳 OpenAI API quota exceeded - check billing');
+        }
+        else if (error.code === 'rate_limit_exceeded') {
+            console.error('🚫 OpenAI API rate limit exceeded');
+        }
+        else {
+            console.error('❌ Error generating GPT suggestion:', error.message || error);
+        }
         ws.send(JSON.stringify({
             type: 'error',
             message: 'Errore nella generazione del suggerimento',

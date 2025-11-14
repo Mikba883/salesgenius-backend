@@ -550,9 +550,15 @@ wss.on('connection', async (ws: WebSocket) => {
               // 3. C'è abbastanza contesto
               // 4. ⚡ NON ha superato il rate limit
               const now = Date.now();
+              const timeSinceLastSuggestion = now - lastSuggestionTime;
+
+              console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)}, bufferLen=${transcriptBuffer.length}, timeSince=${timeSinceLastSuggestion}ms, debounce=${SUGGESTION_DEBOUNCE_MS}ms`);
+
               if (confidence >= 0.6 &&
                   transcriptBuffer.length > 20 &&
-                  (now - lastSuggestionTime) > SUGGESTION_DEBOUNCE_MS) {
+                  timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS) {
+
+                console.log('✅ Conditions met, generating suggestion...');
 
                 // ⚡ CONTROLLO RATE LIMIT SUGGERIMENTI
                 if (session.userId !== 'demo-user') {
@@ -608,6 +614,13 @@ wss.on('connection', async (ws: WebSocket) => {
                 if (transcriptBuffer.length > 1000) {
                   transcriptBuffer = transcriptBuffer.slice(-800);
                 }
+              } else {
+                // Log del motivo per cui il suggerimento NON viene generato
+                const reasons = [];
+                if (confidence < 0.6) reasons.push(`confidence too low (${confidence.toFixed(2)} < 0.6)`);
+                if (transcriptBuffer.length <= 20) reasons.push(`buffer too short (${transcriptBuffer.length} <= 20)`);
+                if (timeSinceLastSuggestion <= SUGGESTION_DEBOUNCE_MS) reasons.push(`debounce not elapsed (${timeSinceLastSuggestion}ms <= ${SUGGESTION_DEBOUNCE_MS}ms)`);
+                console.log(`⏸️ Suggestion skipped: ${reasons.join(', ')}`);
               }
             }
           }

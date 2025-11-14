@@ -82,6 +82,8 @@ export async function handleGPTSuggestion(
   ws: WebSocket,
   onSuggestionGenerated?: (category: string, suggestion: string) => Promise<void>
 ): Promise<void> {
+  console.log(`💬 Generating suggestion for transcript: "${transcript.substring(0, 100)}..."`);
+
   try {
     const messages = buildMessages({
       transcript,
@@ -97,6 +99,8 @@ export async function handleGPTSuggestion(
 
     // ✅ CORRETTA CHIAMATA GPT (compatibile TypeScript) + TIMEOUT PROTECTION
     const GPT_TIMEOUT_MS = 8000; // 8 secondi max
+
+    console.log(`🔄 Calling OpenAI API (model: ${qualitySettings.model}, timeout: ${GPT_TIMEOUT_MS}ms)...`);
 
     const completion = await Promise.race([
       openai.chat.completions.create({
@@ -114,12 +118,14 @@ export async function handleGPTSuggestion(
       )
     ]);
 
+    console.log(`✅ OpenAI API response received`);
+
     const responseText = completion.choices[0]?.message?.content || '{}';
     let parsedResponse;
     try {
       parsedResponse = JSON.parse(responseText);
     } catch (e) {
-      console.error('Failed to parse GPT response:', responseText);
+      console.error('❌ Failed to parse GPT response:', responseText);
       throw new Error('Invalid response format from GPT');
     }
 
@@ -188,8 +194,17 @@ export async function handleGPTSuggestion(
     console.log(`🤖 [${category}/${intent}] ${language}: ${suggestion}`);
 
     if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
-  } catch (error) {
-    console.error('Error generating GPT suggestion:', error);
+  } catch (error: any) {
+    if (error.message === 'OpenAI request timeout') {
+      console.error('⏱️ OpenAI API timeout after 8 seconds');
+    } else if (error.code === 'insufficient_quota') {
+      console.error('💳 OpenAI API quota exceeded - check billing');
+    } else if (error.code === 'rate_limit_exceeded') {
+      console.error('🚫 OpenAI API rate limit exceeded');
+    } else {
+      console.error('❌ Error generating GPT suggestion:', error.message || error);
+    }
+
     ws.send(
       JSON.stringify({
         type: 'error',
