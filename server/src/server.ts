@@ -294,9 +294,10 @@ wss.on('connection', async (ws: WebSocket) => {
   let deepgramReady = false; // Flag per tracciare quando Deepgram è pronto
   let audioBuffer: Buffer[] = []; // Buffer per pacchetti audio in attesa
   let audioPacketsSent = 0; // Contatore pacchetti inviati a Deepgram
+  let audioPacketsReceived = 0; // ⚡ Contatore pacchetti audio ricevuti dal frontend
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 50000; // ⚡ 50 secondi - evita spam di suggerimenti (era 10s)
+  const SUGGESTION_DEBOUNCE_MS = 15000; // ⚡ 15 secondi - feedback più frequente (era 50s)
   let currentUserId: string | null = null; // Traccia userId per rate limiting
 
   ws.on('message', async (message: Buffer) => {
@@ -562,8 +563,9 @@ wss.on('connection', async (ws: WebSocket) => {
           const transcript = data.channel?.alternatives[0]?.transcript;
           const isFinal = data.is_final;
           const confidence = data.channel?.alternatives[0]?.confidence || 0;
+          const detectedLanguage = data.channel?.alternatives[0]?.language || data.channel?.detected_language || 'unknown';
 
-          console.log(`🔍 Transcript details - Text: "${transcript}", isFinal: ${isFinal}, confidence: ${confidence}`);
+          console.log(`🔍 Transcript details - Text: "${transcript}", isFinal: ${isFinal}, confidence: ${confidence}, language: ${detectedLanguage}`);
 
           if (transcript && transcript.length > 0) {
             console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);
@@ -619,6 +621,16 @@ wss.on('connection', async (ws: WebSocket) => {
                 }
 
                 lastSuggestionTime = now;
+
+                // ⚡ LOG CHIARO: Cosa stiamo passando a GPT
+                console.log('\n' + '='.repeat(80));
+                console.log('🤖 CHIAMATA GPT - INIZIO');
+                console.log('='.repeat(80));
+                console.log(`📝 Transcript completo (${transcriptBuffer.length} caratteri):`);
+                console.log(`   "${transcriptBuffer}"`);
+                console.log(`📊 Confidence: ${confidence.toFixed(2)}`);
+                console.log(`🌍 Lingua rilevata: ${detectedLanguage}`);
+                console.log('='.repeat(80) + '\n');
 
                 // Chiama la funzione GPT per generare suggerimenti
                 await handleGPTSuggestion(
@@ -690,6 +702,9 @@ wss.on('connection', async (ws: WebSocket) => {
         });
       }
 
+      // ⚡ Conta pacchetti audio ricevuti dal frontend
+      audioPacketsReceived++;
+
       // Invia audio a Deepgram (o bufferizza se non è ancora pronto)
       if (deepgramConnection) {
         const readyState = deepgramConnection.getReadyState();
@@ -699,14 +714,17 @@ wss.on('connection', async (ws: WebSocket) => {
           // Deepgram è pronto: invia immediatamente
           deepgramConnection.send(message);
           audioPacketsSent++;
-          console.log(`✅ Sending audio packet directly to Deepgram (${message.length} bytes) - Total sent: ${audioPacketsSent}`);
+          console.log(`✅ Sending audio packet directly to Deepgram (${message.length} bytes)`);
+          console.log(`📊 Audio Stats - Ricevuti: ${audioPacketsReceived}, Inviati: ${audioPacketsSent}, In Buffer: ${audioBuffer.length}`);
         } else {
           // Deepgram non è ancora pronto: bufferizza il pacchetto
           audioBuffer.push(message);
           console.log(`📦 Buffering audio packet... (${audioBuffer.length} in queue, ready: ${deepgramReady}, state: ${readyState})`);
+          console.log(`📊 Audio Stats - Ricevuti: ${audioPacketsReceived}, Inviati: ${audioPacketsSent}, In Buffer: ${audioBuffer.length}`);
         }
       } else {
         console.log('⚠️ No Deepgram connection available to send audio');
+        console.log(`📊 Audio Stats - Ricevuti: ${audioPacketsReceived}, Inviati: 0 (no connection)`);
       }
 
     } catch (error) {

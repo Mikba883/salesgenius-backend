@@ -217,6 +217,16 @@ export async function handleGPTSuggestion(
 
     console.log(`🤖 [${category}/${intent}] ${language}: ${suggestion}`);
 
+    // ⚡ LOG CHIARO: Fine chiamata GPT
+    console.log('\n' + '='.repeat(80));
+    console.log('🤖 CHIAMATA GPT - COMPLETATA');
+    console.log('='.repeat(80));
+    console.log(`✅ Category: ${category}`);
+    console.log(`✅ Intent: ${intent}`);
+    console.log(`✅ Language: ${language}`);
+    console.log(`✅ Suggestion: "${suggestion}"`);
+    console.log('='.repeat(80) + '\n');
+
     if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
   } catch (error: any) {
     if (error.message === 'OpenAI request timeout') {
