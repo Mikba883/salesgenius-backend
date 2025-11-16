@@ -124,16 +124,40 @@ export async function handleGPTSuggestion(
     let parsedResponse;
     try {
       parsedResponse = JSON.parse(responseText);
+      console.log(`📋 GPT Raw Response:`, JSON.stringify(parsedResponse, null, 2));
     } catch (e) {
       console.error('❌ Failed to parse GPT response:', responseText);
       throw new Error('Invalid response format from GPT');
     }
 
-    // Estratti principali
-    const category: SuggestionCategory = parsedResponse.category?.toLowerCase() || 'discovery';
+    // ⚡ VALIDAZIONE ROBUSTA DELLE CATEGORIE
+    const VALID_CATEGORIES: SuggestionCategory[] = ['rapport', 'discovery', 'value', 'objection', 'closing'];
+    const VALID_INTENTS: SuggestionIntent[] = ['explore', 'express_need', 'show_interest', 'raise_objection', 'decide'];
+
+    let rawCategory = parsedResponse.category?.toLowerCase() || '';
+    let category: SuggestionCategory;
+
+    if (VALID_CATEGORIES.includes(rawCategory as SuggestionCategory)) {
+      category = rawCategory as SuggestionCategory;
+    } else {
+      console.warn(`⚠️ Invalid category "${parsedResponse.category}" received from GPT. Defaulting to 'discovery'. Valid categories: ${VALID_CATEGORIES.join(', ')}`);
+      category = 'discovery';
+    }
+
+    let rawIntent = parsedResponse.intent?.toLowerCase() || '';
+    let intent: SuggestionIntent;
+
+    if (VALID_INTENTS.includes(rawIntent as SuggestionIntent)) {
+      intent = rawIntent as SuggestionIntent;
+    } else {
+      console.warn(`⚠️ Invalid intent "${parsedResponse.intent}" received from GPT. Defaulting to 'explore'. Valid intents: ${VALID_INTENTS.join(', ')}`);
+      intent = 'explore';
+    }
+
     const suggestion = parsedResponse.suggestion || '';
-    const intent: SuggestionIntent = parsedResponse.intent?.toLowerCase() || 'explore';
     const language = parsedResponse.language || 'en';
+
+    console.log(`✅ Validated: category="${category}", intent="${intent}", language="${language}"`);
 
     if (!suggestion.trim()) {
       console.log('Empty suggestion received, skipping');
@@ -192,6 +216,16 @@ export async function handleGPTSuggestion(
     );
 
     console.log(`🤖 [${category}/${intent}] ${language}: ${suggestion}`);
+
+    // ⚡ LOG CHIARO: Fine chiamata GPT
+    console.log('\n' + '='.repeat(80));
+    console.log('🤖 CHIAMATA GPT - COMPLETATA');
+    console.log('='.repeat(80));
+    console.log(`✅ Category: ${category}`);
+    console.log(`✅ Intent: ${intent}`);
+    console.log(`✅ Language: ${language}`);
+    console.log(`✅ Suggestion: "${suggestion}"`);
+    console.log('='.repeat(80) + '\n');
 
     if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
   } catch (error: any) {
