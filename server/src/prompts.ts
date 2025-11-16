@@ -274,6 +274,14 @@ YOUR TASK (step-by-step):
 
 6. **OUTPUT**: Return ONLY valid JSON with exact keywords, in the customer's input language
 
+⚠️ CRITICAL OUTPUT FORMAT REQUIREMENTS:
+- You MUST return ONLY valid JSON, no other text
+- category field MUST be one of these exact keywords: "rapport", "discovery", "value", "objection", "closing"
+- intent field MUST be one of these exact keywords: "explore", "express_need", "show_interest", "raise_objection", "decide"
+- language field MUST be one of: "en", "it", "es", "fr", "de" (matching input language)
+- suggestion field MUST be 35-40 words in the detected language
+- Do NOT use full descriptions like "Discovery & Qualification" - use ONLY the keyword "discovery"
+
 ${categoryInstructions}
 `;
 

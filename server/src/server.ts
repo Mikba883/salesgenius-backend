@@ -296,7 +296,7 @@ wss.on('connection', async (ws: WebSocket) => {
   let audioPacketsSent = 0; // Contatore pacchetti inviati a Deepgram
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 10000; // 10 secondi - bilanciato tra qualità e frequenza
+  const SUGGESTION_DEBOUNCE_MS = 50000; // ⚡ 50 secondi - evita spam di suggerimenti (era 10s)
   let currentUserId: string | null = null; // Traccia userId per rate limiting
 
   ws.on('message', async (message: Buffer) => {
@@ -517,7 +517,8 @@ wss.on('connection', async (ws: WebSocket) => {
             encoding: 'linear16',      // PCM16 format
             sample_rate: 16000,        // 16kHz sample rate
             channels: 1,               // Mono audio
-            language: 'it',
+            language: 'multi',         // ⚡ Multi-language detection (auto-detect: en, it, es, fr, de, etc.)
+            detect_language: true,     // ⚡ Enable language detection for each utterance
             punctuate: true,
             smart_format: true,
             model: 'nova-2',   // ⚡ Modello standard Deepgram (compatibile con il piano corrente)
