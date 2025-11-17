@@ -74,11 +74,13 @@ type SuggestionIntent =
 // ⚙️ SYSTEM STATE & CACHE
 // ============================================================================
 const recentSuggestions = new Set<string>();
-const CACHE_DURATION_MS = 30000; // 30 sec
+const CACHE_DURATION_MS = 300000; // 5 minuti - previene ripetizioni prolungate
 const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 const MAX_HISTORY = 10;  // Aumentato da 5 a 10 per più contesto
 const recentCategories: string[] = []; // ⚡ Track last categories to detect variety issues
 const MAX_CATEGORY_HISTORY = 5;
+const recentSuggestionTexts: string[] = []; // ⚡ Track last 3 full suggestions to prevent repeats
+const MAX_RECENT_SUGGESTIONS = 3;
 
 // ============================================================================
 // 🔍 detectIfValueQuestion() - Check if transcript is asking about VALUE
@@ -208,6 +210,7 @@ Remind seller to look up specific statistics relevant to customer's industry.
       detectedLanguage: detectedLanguage || 'unknown',
       recentCategories: recentCategories,  // ⚡ Pass recent categories for variety tracking
       marketDataContext,  // ⚡ Pass market data context if available
+      recentSuggestions: recentSuggestionTexts,  // ⚡ Pass last 3 suggestions to prevent repeats
     });
 
     const qualityMode = process.env.QUALITY_MODE || 'balanced';
@@ -299,14 +302,21 @@ Remind seller to look up specific statistics relevant to customer's industry.
       return;
     }
 
-    const suggestionKey = `${category}:${suggestion.substring(0, 30)}`;
+    // ⚡ ANTI-DUPLICAZIONE RAFFORZATA: usa 60 caratteri invece di 30
+    const suggestionKey = `${category}:${suggestion.substring(0, 60)}`;
     if (recentSuggestions.has(suggestionKey)) {
-      console.log('Duplicate suggestion, skipping');
+      console.log(`⚠️ Duplicate suggestion detected, skipping: "${suggestion.substring(0, 50)}..."`);
       return;
     }
 
     recentSuggestions.add(suggestionKey);
     setTimeout(() => recentSuggestions.delete(suggestionKey), CACHE_DURATION_MS);
+
+    // ⚡ Track last 3 full suggestions to pass to GPT
+    recentSuggestionTexts.push(suggestion);
+    if (recentSuggestionTexts.length > MAX_RECENT_SUGGESTIONS) {
+      recentSuggestionTexts.shift();
+    }
 
     conversationHistory.push({ role: 'user', content: transcript });
     conversationHistory.push({ role: 'assistant', content: suggestion });
