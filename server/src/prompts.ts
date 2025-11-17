@@ -196,6 +196,7 @@ interface BuildMessagesParams {
   context?: string;
   confidence?: number;
   conversationHistory?: Message[];
+  detectedLanguage?: string;
 }
 
 export function buildMessages(params: BuildMessagesParams): Message[] {
@@ -205,6 +206,7 @@ export function buildMessages(params: BuildMessagesParams): Message[] {
     context = "",
     confidence = 0.8,
     conversationHistory = [],
+    detectedLanguage = "unknown",
   } = params;
 
   const categoryInstructions = `
@@ -227,21 +229,34 @@ ${contextSection}
 LATEST CUSTOMER TEXT (what they just said):
 "${transcript}"
 
+DETECTED LANGUAGE FROM AUDIO: ${detectedLanguage}
+⚠️ CRITICAL: Verify this language by analyzing the TEXT below!
+
 ANALYSIS FRAMEWORK:
 - Transcription confidence: ${confidence.toFixed(2)}
+- Audio detected language: ${detectedLanguage}
 - Previous suggestions: See context above
 
 YOUR TASK (step-by-step):
 
-1. **DETECT LANGUAGE FIRST** ⚠️ CRITICAL:
-   - Read the customer's LATEST message text CAREFULLY (analyze the actual words)
-   - IGNORE any audio metadata about language - analyze the TEXT content
-   - Look for language-specific words to identify: Italian (it), English (en), Spanish (es), French (fr), German (de)
-   - Italian indicators: "che", "sono", "questo", "voglio", "posso", "molto", "anche", "perché"
-   - Spanish indicators: "que", "son", "este", "quiero", "puedo", "muy", "también", "porque"
-   - English indicators: "what", "are", "this", "want", "can", "very", "also", "because"
-   - Your suggestion MUST be in the SAME language as the detected text
-   - DO NOT default to any language - analyze the words to determine language
+1. **DETECT LANGUAGE FIRST** ⚠️ ULTRA CRITICAL:
+   - Audio system detected: "${detectedLanguage}"
+   - BUT you MUST verify by reading the TEXT above
+   - Look for these EXACT word patterns in the text:
+
+   IF you see words like "sono", "questo", "molto", "anche", "perché", "voglio", "posso", "che":
+   → Language is ITALIAN (it), NOT Spanish!
+
+   IF you see words like "son", "este", "muy", "también", "porque", "quiero", "puedo", "que":
+   → Language is SPANISH (es), NOT Italian!
+
+   IF you see words like "are", "this", "very", "also", "because", "want", "can", "what":
+   → Language is ENGLISH (en)
+
+   - Write your suggestion in the VERIFIED language (from text analysis)
+   - If text clearly shows Italian words, respond in ITALIAN even if audio detected Spanish!
+   - If text clearly shows Spanish words, respond in SPANISH even if audio detected Italian!
+   - NEVER mix languages - choose ONE based on the actual text words
 
 2. **UNDERSTAND CUSTOMER STATE**:
    - What did they specifically say? (extract key words/phrases)
@@ -249,27 +264,39 @@ YOUR TASK (step-by-step):
    - What's their emotional state? (curious, concerned, excited, skeptical, ready)
    - What phase of the buying journey? (early exploration, evaluation, decision-making)
 
-3. **CLASSIFY CATEGORY** (choose the ONE most relevant by matching customer's words):
+3. **CLASSIFY CATEGORY** ⚠️ ULTRA CRITICAL - VARY THE CATEGORIES!
 
-   Ask yourself: What is the customer REALLY talking about in their latest message?
+   ⚠️⚠️⚠️ DO NOT DEFAULT TO "discovery" FOR EVERYTHING! ⚠️⚠️⚠️
 
-   - **rapport**: Are they greeting, building relationship, making small talk? → Use "rapport"
-     Examples: "Hi", "How are you", "Nice weather", "How was your weekend"
+   Read the customer's EXACT WORDS and match to the RIGHT category:
 
-   - **discovery**: Are they describing challenges, pain points, current situation, needs? → Use "discovery"
-     Examples: "We're struggling with...", "Our current process...", "The main issue is...", "We need to improve..."
+   **rapport** - ONLY if greeting or small talk:
+   ✅ "Hi", "Hello", "How are you", "Good morning", "Nice to meet you", "How was your weekend"
+   ✅ Ciao, Buongiorno, Come stai, Come va
+   ❌ NOT for product questions or business topics!
 
-   - **value**: Are they asking about benefits, ROI, results, how it works, comparisons? → Use "value"
-     Examples: "What results?", "How does this work?", "What's the ROI?", "Show me benefits", "How does this compare to..."
+   **discovery** - ONLY if describing problems/challenges/needs:
+   ✅ "We're struggling with...", "Our problem is...", "We need help with...", "Current situation is..."
+   ✅ Abbiamo difficoltà con, Il nostro problema è, Abbiamo bisogno di
+   ❌ NOT for questions about benefits or pricing!
 
-   - **objection**: Are they expressing concerns, doubts, pricing issues, hesitation? → Use "objection"
-     Examples: "Too expensive", "I'm concerned", "What if it doesn't work", "We tried before", "Not sure about..."
+   **value** - ONLY if asking about benefits/ROI/results/features:
+   ✅ "What results?", "What are the benefits?", "How does it work?", "What's the ROI?", "Why should I?"
+   ✅ Quali risultati, Quali vantaggi, Come funziona, Qual è il ROI, Perché dovrei
+   ❌ This is the category for product value questions!
 
-   - **closing**: Are they asking about next steps, timelines, implementation, contracts? → Use "closing"
-     Examples: "When can we start?", "What are next steps?", "How long to implement?", "Let's move forward", "I need to discuss with team"
+   **objection** - ONLY if expressing concerns/doubts/pricing worries:
+   ✅ "Too expensive", "I'm worried", "What if fails?", "We tried before", "Budget concerns"
+   ✅ Troppo costoso, Sono preoccupato, E se non funziona, Costa troppo
+   ❌ This is for hesitations and concerns!
 
-   ⚠️ CRITICAL: You MUST vary categories based on what customer says - do NOT always use the same category!
-   ⚠️ Match the EXACT customer words to the right category - be specific, not generic!
+   **closing** - ONLY if ready to move forward/asking next steps:
+   ✅ "When start?", "What are next steps?", "How long to implement?", "Let's proceed", "I need contract"
+   ✅ Quando iniziamo, Quali sono i prossimi passi, Quanto tempo per implementare
+   ❌ This is for buying signals!
+
+   ⚠️⚠️⚠️ MANDATORY RULE: Look at the conversation history above and use a DIFFERENT category than the last 2-3 suggestions!
+   ⚠️⚠️⚠️ FORCE yourself to use all 5 categories in rotation - variety is CRITICAL!
 
 4. **CLASSIFY INTENT** (customer's immediate goal in their message):
    - explore: Seeking information or clarification
