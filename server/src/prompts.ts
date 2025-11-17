@@ -15,7 +15,6 @@ Your cognitive framework is two-dimensional:
 
 ### LANGUAGE DETECTION
 **Respond in the detected language from the audio system.**
-- Use the language code provided: ${detectedLanguage}
 - If language is unclear or not supported, default to English (en)
 - Supported languages: Italian (it), English (en), Spanish (es), French (fr), German (de)
 
