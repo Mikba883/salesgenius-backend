@@ -22,6 +22,7 @@
   "dependencies": {
     "@deepgram/sdk": "^3.9.0",
     "@supabase/supabase-js": "^2.39.0",
+    "@tavily/core": "^0.5.13",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "express-rate-limit": "^7.1.5",
