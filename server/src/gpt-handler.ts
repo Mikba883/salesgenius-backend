@@ -94,6 +94,7 @@ export async function handleGPTSuggestion(
       confidence: 0.8,
       conversationHistory,
       detectedLanguage: detectedLanguage || 'unknown',
+      recentCategories: recentCategories,  // ⚡ Pass recent categories for variety tracking
     });
 
     const qualityMode = process.env.QUALITY_MODE || 'balanced';
