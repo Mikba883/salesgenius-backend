@@ -180,16 +180,17 @@ export async function handleGPTSuggestion(
     const emoji = CATEGORY_EMOJI[category] || '💡';
 
     // 🟢 Invia inizio
-    ws.send(
-      JSON.stringify({
-        type: 'suggestion.start',
-        id: suggestionId,
-        category,
-        intent,
-        language,
-        emoji,
-      })
-    );
+    const startMessage = {
+      type: 'suggestion.start',
+      id: suggestionId,
+      category,
+      intent,
+      language,
+      emoji,
+    };
+
+    console.log(`📤 Sending to FRONTEND - suggestion.start:`, JSON.stringify(startMessage, null, 2));
+    ws.send(JSON.stringify(startMessage));
 
     // 🟢 Stream simulato
     const words = suggestion.split(' ');
@@ -205,15 +206,16 @@ export async function handleGPTSuggestion(
     }
 
     // 🟢 Fine
-    ws.send(
-      JSON.stringify({
-        type: 'suggestion.end',
-        id: suggestionId,
-        fullText: suggestion,
-        category,
-        intent,
-      })
-    );
+    const endMessage = {
+      type: 'suggestion.end',
+      id: suggestionId,
+      fullText: suggestion,
+      category,
+      intent,
+    };
+
+    console.log(`📤 Sending to FRONTEND - suggestion.end:`, JSON.stringify(endMessage, null, 2));
+    ws.send(JSON.stringify(endMessage));
 
     console.log(`🤖 [${category}/${intent}] ${language}: ${suggestion}`);
 
@@ -223,7 +225,9 @@ export async function handleGPTSuggestion(
     console.log('='.repeat(80));
     console.log(`✅ Category: ${category}`);
     console.log(`✅ Intent: ${intent}`);
-    console.log(`✅ Language: ${language}`);
+    console.log(`✅ Language (GPT detected): ${language}`);
+    console.log(`   ℹ️  GPT analyzed the TEXT content to determine this language`);
+    console.log(`   ℹ️  If Deepgram detected different language, GPT correction is applied`);
     console.log(`✅ Suggestion: "${suggestion}"`);
     console.log('='.repeat(80) + '\n');
 
