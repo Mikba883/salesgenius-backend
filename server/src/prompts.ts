@@ -244,12 +244,22 @@ YOUR TASK (step-by-step):
    Ask yourself: What is the customer REALLY talking about in their latest message?
 
    - **rapport**: Are they greeting, building relationship, making small talk? → Use "rapport"
-   - **discovery**: Are they describing challenges, pain points, current situation, needs? → Use "discovery"
-   - **value**: Are they asking about benefits, ROI, results, how it works, comparisons? → Use "value"
-   - **objection**: Are they expressing concerns, doubts, pricing issues, hesitation? → Use "objection"
-   - **closing**: Are they asking about next steps, timelines, implementation, contracts? → Use "closing"
+     Examples: "Hi", "How are you", "Nice weather", "How was your weekend"
 
-   ⚠️ Don't default to generic categories - match the actual content of what they said!
+   - **discovery**: Are they describing challenges, pain points, current situation, needs? → Use "discovery"
+     Examples: "We're struggling with...", "Our current process...", "The main issue is...", "We need to improve..."
+
+   - **value**: Are they asking about benefits, ROI, results, how it works, comparisons? → Use "value"
+     Examples: "What results?", "How does this work?", "What's the ROI?", "Show me benefits", "How does this compare to..."
+
+   - **objection**: Are they expressing concerns, doubts, pricing issues, hesitation? → Use "objection"
+     Examples: "Too expensive", "I'm concerned", "What if it doesn't work", "We tried before", "Not sure about..."
+
+   - **closing**: Are they asking about next steps, timelines, implementation, contracts? → Use "closing"
+     Examples: "When can we start?", "What are next steps?", "How long to implement?", "Let's move forward", "I need to discuss with team"
+
+   ⚠️ CRITICAL: You MUST vary categories based on what customer says - do NOT always use the same category!
+   ⚠️ Match the EXACT customer words to the right category - be specific, not generic!
 
 4. **CLASSIFY INTENT** (customer's immediate goal in their message):
    - explore: Seeking information or clarification
