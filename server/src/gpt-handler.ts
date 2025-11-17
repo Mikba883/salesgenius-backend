@@ -225,7 +225,9 @@ export async function handleGPTSuggestion(
     console.log('='.repeat(80));
     console.log(`✅ Category: ${category}`);
     console.log(`✅ Intent: ${intent}`);
-    console.log(`✅ Language: ${language}`);
+    console.log(`✅ Language (GPT detected): ${language}`);
+    console.log(`   ℹ️  GPT analyzed the TEXT content to determine this language`);
+    console.log(`   ℹ️  If Deepgram detected different language, GPT correction is applied`);
     console.log(`✅ Suggestion: "${suggestion}"`);
     console.log('='.repeat(80) + '\n');
 
