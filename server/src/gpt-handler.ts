@@ -85,19 +85,31 @@ const MAX_CATEGORY_HISTORY = 5;
 // ============================================================================
 function detectIfValueQuestion(transcript: string): boolean {
   const valueKeywords = [
-    // English
-    'roi', 'return on investment', 'benefit', 'result', 'outcome', 'advantage',
-    'comparison', 'compare', 'statistics', 'data', 'research', 'study', 'prove',
-    'worth it', 'value', 'impact', 'savings', 'efficiency', 'productivity',
-    'how does it work', 'what can', 'what will', 'show me',
-    // Italian
+    // English - Core VALUE questions
+    'roi', 'return', 'benefit', 'result', 'outcome', 'advantage', 'value',
+    'savings', 'save', 'efficiency', 'productivity', 'performance',
+    'comparison', 'compare', 'versus', 'vs', 'better than',
+    'statistics', 'data', 'numbers', 'metrics', 'research', 'study', 'prove', 'evidence',
+    'worth', 'justify', 'impact', 'effect', 'improvement',
+    'how much', 'how many', 'what can', 'what will', 'show me', 'demonstrate',
+    'price', 'cost', 'pricing', 'quanto costa', 'prezzo',
+    // Italian - Core VALUE questions
     'vantaggi', 'risultati', 'benefici', 'ritorno', 'investimento', 'valore',
-    'confronto', 'paragone', 'dati', 'ricerca', 'studio', 'statistiche',
-    'risparmio', 'efficienza', 'produttività', 'come funziona', 'cosa può',
+    'risparmio', 'risparmiare', 'efficienza', 'produttività', 'prestazioni',
+    'confronto', 'paragone', 'paragonare', 'meglio di', 'migliore',
+    'dati', 'numeri', 'metriche', 'ricerca', 'studio', 'statistiche', 'prove', 'evidenze',
+    'vale', 'giustificare', 'impatto', 'effetto', 'miglioramento',
+    'quanto', 'quanti', 'cosa può', 'cosa farà', 'mostrami', 'dimostra',
   ];
 
   const lowerTranscript = transcript.toLowerCase();
-  return valueKeywords.some(keyword => lowerTranscript.includes(keyword));
+  const matched = valueKeywords.some(keyword => lowerTranscript.includes(keyword));
+
+  if (matched) {
+    console.log(`✅ VALUE keywords detected in: "${transcript.substring(0, 80)}..."`);
+  }
+
+  return matched;
 }
 
 // ============================================================================
