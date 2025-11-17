@@ -79,29 +79,29 @@ const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }
 const MAX_HISTORY = 10;  // Aumentato da 5 a 10 per più contesto
 const recentCategories: string[] = []; // ⚡ Track last categories to detect variety issues
 const MAX_CATEGORY_HISTORY = 5;
-const recentSuggestionTexts: string[] = []; // ⚡ Track last 3 full suggestions to prevent repeats
-const MAX_RECENT_SUGGESTIONS = 3;
+const recentSuggestionTexts: string[] = []; // ⚡ Track last 10 suggestions to prevent repeats
+const MAX_RECENT_SUGGESTIONS = 10; // Aumentato da 3 a 10
 
 // ============================================================================
 // 🔍 detectIfValueQuestion() - Check if transcript is asking about VALUE
 // ============================================================================
 function detectIfValueQuestion(transcript: string): boolean {
+  // ⚡ PRECISE VALUE detection - avoid false positives with objections
   const valueKeywords = [
-    // English - Core VALUE questions
-    'roi', 'return', 'benefit', 'result', 'outcome', 'advantage', 'value',
-    'savings', 'save', 'efficiency', 'productivity', 'performance',
-    'comparison', 'compare', 'versus', 'vs', 'better than',
-    'statistics', 'data', 'numbers', 'metrics', 'research', 'study', 'prove', 'evidence',
-    'worth', 'justify', 'impact', 'effect', 'improvement',
-    'how much', 'how many', 'what can', 'what will', 'show me', 'demonstrate',
-    'price', 'cost', 'pricing', 'quanto costa', 'prezzo',
+    // English - Core VALUE questions (removed ambiguous cost/price)
+    'roi', 'return on investment', 'benefit', 'result', 'outcome', 'advantage', 'value proposition',
+    'savings', 'efficiency gains', 'productivity improvement', 'performance metrics',
+    'comparison', 'compare to', 'versus', 'better than', 'how does it compare',
+    'statistics', 'metrics', 'research', 'study', 'prove', 'evidence', 'data shows',
+    'worth it', 'justify', 'impact', 'business case', 'improvement',
+    'what can we expect', 'what will we get', 'show me', 'demonstrate', 'proof',
     // Italian - Core VALUE questions
-    'vantaggi', 'risultati', 'benefici', 'ritorno', 'investimento', 'valore',
-    'risparmio', 'risparmiare', 'efficienza', 'produttività', 'prestazioni',
-    'confronto', 'paragone', 'paragonare', 'meglio di', 'migliore',
-    'dati', 'numeri', 'metriche', 'ricerca', 'studio', 'statistiche', 'prove', 'evidenze',
-    'vale', 'giustificare', 'impatto', 'effetto', 'miglioramento',
-    'quanto', 'quanti', 'cosa può', 'cosa farà', 'mostrami', 'dimostra',
+    'vantaggi', 'risultati attesi', 'benefici', 'ritorno investimento', 'valore',
+    'risparmio', 'efficienza', 'produttività', 'prestazioni',
+    'confronto con', 'paragone', 'meglio di', 'come si confronta',
+    'dati', 'metriche', 'ricerca', 'studio', 'statistiche', 'prove', 'evidenze',
+    'vale la pena', 'giustificare', 'impatto', 'miglioramento',
+    'cosa possiamo aspettarci', 'cosa otterremo', 'mostrami', 'dimostra', 'prova',
   ];
 
   const lowerTranscript = transcript.toLowerCase();
