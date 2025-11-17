@@ -31,6 +31,7 @@ import OpenAI from 'openai';
 import { WebSocket } from 'ws';
 import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/supabase-js';
 import { buildMessages, QUALITY_PRESETS } from './prompts';
+import { tavily } from '@tavily/core';
 
 // Inizializza OpenAI
 const openai = new OpenAI({
@@ -42,6 +43,9 @@ const supabase: SupabaseClient = createSupabaseClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 );
+
+// Inizializza Tavily (Web Search)
+const tavilyClient = tavily({ apiKey: process.env.TAVILY_API_KEY! });
 
 // ============================================================================
 // 🎯 CATEGORY SYSTEM (macro) — allineato a SalesGenius v3.3
@@ -114,19 +118,62 @@ export async function handleGPTSuggestion(
     let marketDataContext = '';
 
     if (isValueQuestion) {
-      console.log('🔍 VALUE question detected - fetching real market data...');
+      console.log('🔍 VALUE question detected - fetching real market data from Tavily...');
       try {
-        // Note: WebSearch is not available in this context, would need to be passed in or imported
-        // For now, we'll add placeholder for market data that should be fetched
-        // In production, this should call a WebSearch API or database
-        marketDataContext = `
-📊 MARKET DATA AVAILABLE: Guide seller to reference recent industry research.
+        // Costruisci query di ricerca intelligente basata sul transcript
+        const searchQuery = `B2B sales ROI statistics industry benchmarks ${transcript.substring(0, 100)}`;
+
+        console.log(`📡 Tavily search query: "${searchQuery}"`);
+
+        // Chiamata Tavily API con timeout
+        const searchPromise = tavilyClient.search(searchQuery, {
+          searchDepth: 'basic',
+          maxResults: 3,
+          includeAnswer: true,
+        });
+
+        const searchTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Tavily search timeout')), 5000)
+        );
+
+        const response = await Promise.race([searchPromise, searchTimeout]);
+
+        console.log(`✅ Tavily returned ${response.results?.length || 0} results`);
+
+        // Estrai dati rilevanti dai risultati
+        if (response.results && response.results.length > 0) {
+          const sources = response.results.map((r: any) => ({
+            title: r.title,
+            url: r.url,
+            content: r.content?.substring(0, 200) || '', // Primi 200 caratteri
+            score: r.score
+          }));
+
+          marketDataContext = `
+📊 REAL MARKET DATA (from Tavily Web Search):
+
+${response.answer ? `Quick Answer: ${response.answer}\n` : ''}
+Sources found:
+${sources.map((s, i) => `${i + 1}. ${s.title}
+   Source: ${s.url}
+   Data: ${s.content}
+`).join('\n')}
+
+⚠️ IMPORTANT: Use these REAL statistics in your suggestion. Cite the source URLs.
+Guide seller to reference these specific data points when answering customer.
+`;
+          console.log('✅ Market data context prepared with real Tavily results');
+        } else {
+          marketDataContext = `
+📊 MARKET DATA: Guide seller to reference recent industry research.
 Common sources: Gartner, McKinsey, Forrester, IDC, industry-specific reports.
 Remind seller to look up specific statistics relevant to customer's industry.
 `;
-        console.log('✅ Market data context prepared');
-      } catch (error) {
-        console.log('⚠️ Could not fetch market data, proceeding without it');
+          console.log('⚠️ Tavily returned no results, using generic guidance');
+        }
+      } catch (error: any) {
+        console.log(`⚠️ Tavily search failed: ${error.message}, proceeding without market data`);
+        marketDataContext = '';
       }
     }
 
