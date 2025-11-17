@@ -519,7 +519,6 @@ wss.on('connection', async (ws: WebSocket) => {
             sample_rate: 16000,        // 16kHz sample rate
             channels: 1,               // Mono audio
             language: 'multi',         // ⚡ Multi-language detection (auto-detect: en, it, es, fr, de, etc.)
-            detect_language: true,     // ⚡ Enable language detection for each utterance
             punctuate: true,
             smart_format: true,
             model: 'nova-2',   // ⚡ Modello standard Deepgram (compatibile con il piano corrente)
