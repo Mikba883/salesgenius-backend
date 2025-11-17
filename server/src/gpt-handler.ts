@@ -129,13 +129,18 @@ export async function handleGPTSuggestion(
     const isValueQuestion = detectIfValueQuestion(transcript);
     let marketDataContext = '';
 
+    console.log(`🔎 VALUE question check: ${isValueQuestion ? 'YES - Will fetch Tavily data' : 'NO - Skipping Tavily'}`);
+
     if (isValueQuestion) {
       console.log('🔍 VALUE question detected - fetching real market data from Tavily...');
+      console.log(`🔑 Tavily API Key present: ${process.env.TAVILY_API_KEY ? 'YES' : 'NO'}`);
+
       try {
         // Costruisci query di ricerca intelligente basata sul transcript
         const searchQuery = `B2B sales ROI statistics industry benchmarks ${transcript.substring(0, 100)}`;
 
         console.log(`📡 Tavily search query: "${searchQuery}"`);
+        console.log(`⏱️  Starting Tavily API call with 5s timeout...`);
 
         // Chiamata Tavily API con timeout
         const searchPromise = tavilyClient.search(searchQuery, {
@@ -150,6 +155,7 @@ export async function handleGPTSuggestion(
 
         const response = await Promise.race([searchPromise, searchTimeout]);
 
+        console.log(`✅ Tavily API call completed successfully`);
         console.log(`✅ Tavily returned ${response.results?.length || 0} results`);
 
         // Estrai dati rilevanti dai risultati
@@ -184,9 +190,15 @@ Remind seller to look up specific statistics relevant to customer's industry.
           console.log('⚠️ Tavily returned no results, using generic guidance');
         }
       } catch (error: any) {
-        console.log(`⚠️ Tavily search failed: ${error.message}, proceeding without market data`);
+        console.error(`❌ Tavily search FAILED!`);
+        console.error(`   Error type: ${error.constructor.name}`);
+        console.error(`   Error message: ${error.message}`);
+        console.error(`   Full error:`, error);
+        console.log(`⚠️ Proceeding without market data`);
         marketDataContext = '';
       }
+    } else {
+      console.log(`ℹ️  No VALUE keywords detected, skipping Tavily search`);
     }
 
     const messages = buildMessages({
