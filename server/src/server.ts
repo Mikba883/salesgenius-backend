@@ -297,9 +297,17 @@ wss.on('connection', async (ws: WebSocket) => {
   let audioPacketsReceived = 0; // ⚡ Contatore pacchetti audio ricevuti dal frontend
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 40000; // ⚡ 40 secondi - suggerimenti meno frequenti ma più intelligenti
+  const SUGGESTION_DEBOUNCE_MS = 10000; // ⚡ 10 secondi - reagisce rapidamente ai momenti chiave
   const MIN_CONFIDENCE = 0.75; // ⚡ Minima confidence per suggerimenti (0.75 = alta qualità trascrizione)
-  const MIN_BUFFER_LENGTH = 150; // ⚡ Minimo 150 caratteri per contesto sufficiente
+  const MIN_BUFFER_LENGTH = 25; // ⚡ 25 caratteri - cattura obiezioni brevi come "Costa troppo" o "Non mi interessa"
+  const CRITICAL_OBJECTION_PHRASES = [
+    // Italiano
+    'costa troppo', 'troppo caro', 'troppo costoso', 'non mi interessa', 'ci devo pensare',
+    'non ho budget', 'non abbiamo soldi', 'troppo per noi', 'fuori budget',
+    // English
+    'too expensive', 'too much', 'not interested', 'need to think', 'no budget',
+    'can\'t afford', 'too costly', 'out of budget'
+  ];
   let currentUserId: string | null = null; // Traccia userId per rate limiting
 
   ws.on('message', async (message: Buffer) => {
@@ -583,13 +591,30 @@ wss.on('connection', async (ws: WebSocket) => {
               const now = Date.now();
               const timeSinceLastSuggestion = now - lastSuggestionTime;
 
-              console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)} (min: ${MIN_CONFIDENCE}), bufferLen=${transcriptBuffer.length} (min: ${MIN_BUFFER_LENGTH}), timeSince=${timeSinceLastSuggestion}ms (min: ${SUGGESTION_DEBOUNCE_MS}ms)`);
+              // ⚡ CHECK: Frase breve critica? (obiezione importante)
+              const transcriptLower = transcript.toLowerCase();
+              const isCriticalObjection = CRITICAL_OBJECTION_PHRASES.some(phrase =>
+                transcriptLower.includes(phrase)
+              );
 
-              if (confidence >= MIN_CONFIDENCE &&
+              console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)} (min: ${MIN_CONFIDENCE}), bufferLen=${transcriptBuffer.length} (min: ${MIN_BUFFER_LENGTH}), timeSince=${timeSinceLastSuggestion}ms (min: ${SUGGESTION_DEBOUNCE_MS}ms), isCriticalObjection=${isCriticalObjection}`);
+
+              // ⚡ LOGICA MIGLIORATA: Processa se (condizioni normali) OR (obiezione critica breve)
+              const normalConditionsMet = confidence >= MIN_CONFIDENCE &&
                   transcriptBuffer.length >= MIN_BUFFER_LENGTH &&
-                  timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS) {
+                  timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS;
 
-                console.log('✅ Conditions met for HIGH-QUALITY suggestion, generating...');
+              const criticalObjectionConditionsMet = confidence >= MIN_CONFIDENCE &&
+                  isCriticalObjection &&
+                  timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS;
+
+              if (normalConditionsMet || criticalObjectionConditionsMet) {
+
+                if (criticalObjectionConditionsMet && !normalConditionsMet) {
+                  console.log('🚨 CRITICAL OBJECTION DETECTED - Processing short phrase immediately!');
+                } else {
+                  console.log('✅ Conditions met for HIGH-QUALITY suggestion, generating...');
+                }
 
                 // ⚡ CONTROLLO RATE LIMIT SUGGERIMENTI
                 if (session.userId !== 'demo-user') {
