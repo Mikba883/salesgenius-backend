@@ -297,10 +297,12 @@ wss.on('connection', async (ws: WebSocket) => {
   let audioPacketsReceived = 0; // ⚡ Contatore pacchetti audio ricevuti dal frontend
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
-  const SUGGESTION_DEBOUNCE_MS = 40000; // ⚡ 40 secondi - suggerimenti meno frequenti ma più intelligenti
-  const MIN_CONFIDENCE = 0.75; // ⚡ Minima confidence per suggerimenti (0.75 = alta qualità trascrizione)
-  const MIN_BUFFER_LENGTH = 150; // ⚡ Minimo 150 caratteri per contesto sufficiente
-  let currentUserId: string | null = null; // Traccia userId per rate limiting
+  let lastSuggestionCategory: string | null = null; // ⚡ Track last category for dynamic debounce
+  const SUGGESTION_DEBOUNCE_URGENT_MS = 15000; // ⚡ 15 secondi per Objection/Closing (reattività critica)
+  const SUGGESTION_DEBOUNCE_NORMAL_MS = 40000; // ⚡ 40 secondi per Discovery/Value/Rapport
+  const MIN_CONFIDENCE = 0.65; // ⚡ 65% confidence (cattura più contenuto in audio reali)
+  const MIN_BUFFER_LENGTH = 50; // ⚡ 50 caratteri (cattura obiezioni brevi come "Costa troppo")
+  let currentUserId: string | null = null; // Traccia userId for rate limiting
 
   ws.on('message', async (message: Buffer) => {
     // LOG ASSOLUTO: Ogni messaggio ricevuto
@@ -576,18 +578,22 @@ wss.on('connection', async (ws: WebSocket) => {
               console.log(`📊 Buffer length: ${transcriptBuffer.length} chars`);
 
               // Genera suggerimento solo se:
-              // 1. È passato abbastanza tempo dall'ultimo
+              // 1. È passato abbastanza tempo dall'ultimo (debounce dinamico)
               // 2. La confidence è alta
               // 3. C'è abbastanza contesto
               // 4. ⚡ NON ha superato il rate limit
               const now = Date.now();
               const timeSinceLastSuggestion = now - lastSuggestionTime;
 
-              console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)} (min: ${MIN_CONFIDENCE}), bufferLen=${transcriptBuffer.length} (min: ${MIN_BUFFER_LENGTH}), timeSince=${timeSinceLastSuggestion}ms (min: ${SUGGESTION_DEBOUNCE_MS}ms)`);
+              // ⚡ DEBOUNCE DINAMICO: 15s per Objection/Closing, 40s per altri
+              const isUrgentCategory = lastSuggestionCategory === 'objection' || lastSuggestionCategory === 'closing';
+              const requiredDebounce = isUrgentCategory ? SUGGESTION_DEBOUNCE_URGENT_MS : SUGGESTION_DEBOUNCE_NORMAL_MS;
+
+              console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)} (min: ${MIN_CONFIDENCE}), bufferLen=${transcriptBuffer.length} (min: ${MIN_BUFFER_LENGTH}), timeSince=${timeSinceLastSuggestion}ms (required: ${requiredDebounce}ms, lastCategory: ${lastSuggestionCategory || 'none'})`);
 
               if (confidence >= MIN_CONFIDENCE &&
                   transcriptBuffer.length >= MIN_BUFFER_LENGTH &&
-                  timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS) {
+                  timeSinceLastSuggestion > requiredDebounce) {
 
                 console.log('✅ Conditions met for HIGH-QUALITY suggestion, generating...');
 
@@ -640,6 +646,9 @@ wss.on('connection', async (ws: WebSocket) => {
                   ws,
                   detectedLanguage,
                   async (category: string, suggestion: string) => {
+                    // ⚡ Salva categoria per debounce dinamico
+                    lastSuggestionCategory = category;
+
                     // Callback per salvare il suggerimento (solo per utenti autenticati)
                     if (session.userId !== 'demo-user') {
                       await saveSuggestion(
@@ -662,7 +671,7 @@ wss.on('connection', async (ws: WebSocket) => {
                 const reasons = [];
                 if (confidence < MIN_CONFIDENCE) reasons.push(`confidence too low (${confidence.toFixed(2)} < ${MIN_CONFIDENCE})`);
                 if (transcriptBuffer.length < MIN_BUFFER_LENGTH) reasons.push(`buffer too short (${transcriptBuffer.length} < ${MIN_BUFFER_LENGTH} chars)`);
-                if (timeSinceLastSuggestion <= SUGGESTION_DEBOUNCE_MS) reasons.push(`cooldown active (${Math.round(timeSinceLastSuggestion/1000)}s / ${Math.round(SUGGESTION_DEBOUNCE_MS/1000)}s)`);
+                if (timeSinceLastSuggestion <= requiredDebounce) reasons.push(`cooldown active (${Math.round(timeSinceLastSuggestion/1000)}s / ${Math.round(requiredDebounce/1000)}s, category: ${lastSuggestionCategory || 'none'})`);
                 console.log(`⏸️ Suggestion skipped (waiting for quality): ${reasons.join(', ')}`);
               }
             }
