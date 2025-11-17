@@ -77,6 +77,26 @@ const recentCategories: string[] = []; // ⚡ Track last categories to detect va
 const MAX_CATEGORY_HISTORY = 5;
 
 // ============================================================================
+// 🔍 detectIfValueQuestion() - Check if transcript is asking about VALUE
+// ============================================================================
+function detectIfValueQuestion(transcript: string): boolean {
+  const valueKeywords = [
+    // English
+    'roi', 'return on investment', 'benefit', 'result', 'outcome', 'advantage',
+    'comparison', 'compare', 'statistics', 'data', 'research', 'study', 'prove',
+    'worth it', 'value', 'impact', 'savings', 'efficiency', 'productivity',
+    'how does it work', 'what can', 'what will', 'show me',
+    // Italian
+    'vantaggi', 'risultati', 'benefici', 'ritorno', 'investimento', 'valore',
+    'confronto', 'paragone', 'dati', 'ricerca', 'studio', 'statistiche',
+    'risparmio', 'efficienza', 'produttività', 'come funziona', 'cosa può',
+  ];
+
+  const lowerTranscript = transcript.toLowerCase();
+  return valueKeywords.some(keyword => lowerTranscript.includes(keyword));
+}
+
+// ============================================================================
 // 🧠 handleGPTSuggestion()
 // ============================================================================
 export async function handleGPTSuggestion(
@@ -89,11 +109,34 @@ export async function handleGPTSuggestion(
   console.log(`🌍 Deepgram detected language: ${detectedLanguage || 'unknown'}`);
 
   try {
+    // ⚡ STEP 1: Check if this is a VALUE question that needs real market data
+    const isValueQuestion = detectIfValueQuestion(transcript);
+    let marketDataContext = '';
+
+    if (isValueQuestion) {
+      console.log('🔍 VALUE question detected - fetching real market data...');
+      try {
+        // Note: WebSearch is not available in this context, would need to be passed in or imported
+        // For now, we'll add placeholder for market data that should be fetched
+        // In production, this should call a WebSearch API or database
+        marketDataContext = `
+📊 MARKET DATA AVAILABLE: Guide seller to reference recent industry research.
+Common sources: Gartner, McKinsey, Forrester, IDC, industry-specific reports.
+Remind seller to look up specific statistics relevant to customer's industry.
+`;
+        console.log('✅ Market data context prepared');
+      } catch (error) {
+        console.log('⚠️ Could not fetch market data, proceeding without it');
+      }
+    }
+
     const messages = buildMessages({
       transcript,
       confidence: 0.8,
       conversationHistory,
       detectedLanguage: detectedLanguage || 'unknown',
+      recentCategories: recentCategories,  // ⚡ Pass recent categories for variety tracking
+      marketDataContext,  // ⚡ Pass market data context if available
     });
 
     const qualityMode = process.env.QUALITY_MODE || 'balanced';

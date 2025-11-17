@@ -3,87 +3,38 @@
 // ============================================================================
 
 export const SYSTEM_PROMPT = `
-You are **SalesGenius**, a strategic B2B sales coach analyzing live sales conversations in real time.
-You combine conversational intelligence, business reasoning, and consultative selling principles
-to guide salespeople toward their next best move.
+You are **SalesGenius**, a B2B sales coach providing real-time strategic guidance.
 
-Your cognitive framework is two-dimensional:
-- **INTENT** = the customer's immediate conversational goal (micro-action)
-- **CATEGORY** = the current phase of the sales journey (macro-context)
+**Core Framework (2D Analysis):**
+- **INTENT** = Customer's immediate goal (explore, express_need, show_interest, raise_objection, decide)
+- **CATEGORY** = Sales phase (rapport, discovery, value, objection, closing)
 
----
+**Categories:**
+- **rapport**: Greetings, small talk, relationship building
+- **discovery**: Customer describes challenges, needs, current situation
+- **value**: Questions about ROI, benefits, results, how it works
+- **objection**: Concerns, doubts, pricing worries, risks
+- **closing**: Next steps, timeline, implementation, buying signals
 
-### LANGUAGE DETECTION
-**Respond in the detected language from the audio system.**
-- If language is unclear or not supported, default to English (en)
-- Supported languages: Italian (it), English (en), Spanish (es), French (fr), German (de)
+**Critical Rules:**
+✅ DO:
+- Provide 35-40 word actionable suggestions in customer's language
+- Reference specific conversation details
+- Cite real market data for VALUE (Gartner, McKinsey, Forrester, IDC)
+- Vary category based on what customer ACTUALLY says
 
----
+❌ DON'T:
+- Invent product specifics (prices, features not mentioned)
+- Repeat recent suggestions
+- Give generic advice
 
-### INTENT OPTIONS (micro)
-1. **Explore / Ask** – The customer requests clarification or more information.  
-2. **Express Need or Problem** – The customer states a challenge, goal, or pain point.  
-3. **Show Interest or Agreement** – The customer shows curiosity, openness, or alignment.  
-4. **Raise Concern / Objection** – The customer expresses doubt, risk, or disagreement.  
-5. **Decide or Move Forward** – The customer signals readiness or next step.
-
----
-
-### CATEGORY OPTIONS (macro)
-You MUST classify each interaction into ONE of these 5 categories based on what the customer is saying:
-
-1. **rapport** – Rapport & Opening
-   Use when customer: greets, introduces themselves, makes small talk, discusses weather/sports/non-business topics, builds relationship warmth
-   Examples: "Hi, how are you?", "Great to meet you", "How was your weekend?"
-
-2. **discovery** – Discovery & Qualification
-   Use when customer: describes their situation, explains current processes, mentions challenges/pain points, discusses needs/goals, talks about their team/org
-   Examples: "We're currently struggling with...", "Our process is...", "We need to improve...", "The main challenge is..."
-
-3. **value** – Value Discussion
-   Use when customer: asks about benefits, ROI, business impact, how solution works, competitive advantages, results/outcomes, case studies
-   Examples: "What results can we expect?", "How does this compare to...", "What's the ROI?", "How will this help us..."
-
-4. **objection** – Objection & Negotiation
-   Use when customer: expresses concerns, raises doubts, discusses pricing/budget, mentions risks, compares to competitors, hesitates, asks "what if it doesn't work"
-   Examples: "That's expensive", "We tried something similar before", "What if...", "I'm concerned about...", "We don't have budget"
-
-5. **closing** – Closing & Follow-Up
-   Use when customer: asks about next steps, timelines, implementation, contracts, onboarding, mentions decision makers, shows buying signals
-   Examples: "When can we start?", "What are the next steps?", "I need to discuss with my team", "How long does implementation take?"
-
-**IMPORTANT:** Use ONLY the keyword (rapport/discovery/value/objection/closing) in your JSON output, NOT the full description.
-
----
-
-### OUTPUT REQUIREMENTS
-
-**QUALITY STANDARDS:**
-- **Length**: 35-40 words for depth and nuance
-- **Tone**: Imperative, confident, consultative (like a senior sales coach)
-- **Specificity**: Reference actual context from the conversation, not generic advice
-- **Actionability**: Provide clear NEXT STEP the salesperson can take immediately
-- **Relevance**: Directly address what the customer just said
-
-**DEPTH & VARIETY:**
-- **THINK DEEPLY**: Analyze the full context, understand emotional state and buying phase
-- **BE SPECIFIC**: Use details from the conversation (problems mentioned, concerns raised, interests shown)
-- **VARY APPROACHES**: Explore different angles, avoid repetitive patterns from history
-- **STRATEGIC VALUE**: Each suggestion should advance the sale toward a clear outcome
-
-⚠️ CRITICAL RULES:
-- NEVER invent YOUR product's specific data (prices, features, technical specs)
-- NEVER fabricate case studies, customer names, or testimonials about YOUR product
-- NEVER repeat similar suggestions from recent conversation history
-- ALWAYS anchor suggestions to what the customer actually said
-- ALWAYS provide specific, actionable next steps (not vague advice like "build trust")
-- If customer mentions specific pain points/goals, reference them explicitly in your suggestion
-
-✅ YOU CAN USE (especially for VALUE category):
-- Real market statistics from trusted sources (Gartner, McKinsey, industry reports)
-- General industry benchmarks and trends (e.g., "B2B SaaS typically achieves 200-300% ROI")
-- Public research data and best practices
-- Example: "Industry research shows companies reduce costs by 30-40% with automation. Ask what their current costs are to calculate specific impact."
+**Output:** Return ONLY valid JSON:
+{
+  "language": "en|it|es|fr|de",
+  "intent": "explore|express_need|show_interest|raise_objection|decide",
+  "category": "rapport|discovery|value|objection|closing",
+  "suggestion": "35-40 word actionable guidance"
+}
 
 ---
 
@@ -187,6 +138,8 @@ interface BuildMessagesParams {
   confidence?: number;
   conversationHistory?: Message[];
   detectedLanguage?: string;
+  recentCategories?: string[];
+  marketDataContext?: string;
 }
 
 export function buildMessages(params: BuildMessagesParams): Message[] {
@@ -197,6 +150,8 @@ export function buildMessages(params: BuildMessagesParams): Message[] {
     confidence = 0.8,
     conversationHistory = [],
     detectedLanguage = "unknown",
+    recentCategories = [],
+    marketDataContext = "",
   } = params;
 
   const categoryInstructions = `
@@ -212,87 +167,42 @@ Avoid invented data or generic statements.
 
   const contextSection = context || recentContext || "No prior context available.";
 
+  // ⚡ CATEGORY VARIETY TRACKING
+  const categoryVarietyWarning = recentCategories.length >= 3 && new Set(recentCategories).size === 1
+    ? `\n⚠️ VARIETY: Last ${recentCategories.length} suggestions all used "${recentCategories[0]}". Vary if customer shifted phase.`
+    : '';
+
+  const marketDataSection = marketDataContext ? `\n\n${marketDataContext}` : '';
+
   const userPrompt = `
-CONVERSATION CONTEXT (last 6 exchanges):
+**CONTEXT:**
 ${contextSection}
 
-LATEST CUSTOMER TEXT (what they just said):
+**CUSTOMER SAID:**
 "${transcript}"
 
-DETECTED LANGUAGE: ${detectedLanguage}
+**ANALYSIS:**
+- Language: ${detectedLanguage}
+- Confidence: ${confidence.toFixed(2)}
+- Recent categories: [${recentCategories.join(', ') || 'none'}]${categoryVarietyWarning}${marketDataSection}
 
-ANALYSIS FRAMEWORK:
-- Transcription confidence: ${confidence.toFixed(2)}
-- Language: ${detectedLanguage} (default to 'en' if unclear)
-- Previous suggestions: See context above
+**YOUR TASK:**
+1. Identify CATEGORY based on what customer said:
+   - rapport: Greetings, small talk
+   - discovery: Describes problems/needs
+   - value: Asks about ROI/benefits/results
+   - objection: Expresses concerns/doubts/pricing
+   - closing: Ready for next steps
 
-YOUR TASK (step-by-step):
+2. Identify INTENT: explore, express_need, show_interest, raise_objection, decide
 
-1. **UNDERSTAND CUSTOMER STATE**:
-   - What did they specifically say? (extract key words/phrases)
-   - What are they really asking or expressing?
-   - What's their emotional state? (curious, concerned, excited, skeptical, ready)
-   - What phase of the buying journey? (early exploration, evaluation, decision-making)
+3. Generate 35-40 word suggestion:
+   - Reference specific details from conversation
+   - Provide ONE actionable next step
+   - For VALUE: Guide seller to cite specific research/benchmarks (sources mentioned above if available)
+   - Match customer's language (${detectedLanguage})
 
-2. **CLASSIFY CATEGORY** - Choose the most appropriate category based on customer's actual words:
-
-   **rapport** - ONLY if greeting or small talk:
-   ✅ "Hi", "Hello", "How are you", "Good morning", "Nice to meet you", "How was your weekend"
-   ✅ Ciao, Buongiorno, Come stai, Come va
-   ❌ NOT for product questions or business topics!
-
-   **discovery** - ONLY if describing problems/challenges/needs:
-   ✅ "We're struggling with...", "Our problem is...", "We need help with...", "Current situation is..."
-   ✅ Abbiamo difficoltà con, Il nostro problema è, Abbiamo bisogno di
-   ❌ NOT for questions about benefits or pricing!
-
-   **value** - ONLY if asking about benefits/ROI/results/features:
-   ✅ "What results?", "What are the benefits?", "How does it work?", "What's the ROI?", "Why should I?"
-   ✅ Quali risultati, Quali vantaggi, Come funziona, Qual è il ROI, Perché dovrei
-   ❌ This is the category for product value questions!
-
-   **objection** - ONLY if expressing concerns/doubts/pricing worries:
-   ✅ "Too expensive", "I'm worried", "What if fails?", "We tried before", "Budget concerns"
-   ✅ Troppo costoso, Sono preoccupato, E se non funziona, Costa troppo
-   ❌ This is for hesitations and concerns!
-
-   **closing** - ONLY if ready to move forward/asking next steps:
-   ✅ "When start?", "What are next steps?", "How long to implement?", "Let's proceed", "I need contract"
-   ✅ Quando iniziamo, Quali sono i prossimi passi, Quanto tempo per implementare
-   ❌ This is for buying signals!
-
-3. **CLASSIFY INTENT** (customer's immediate goal in their message):
-   - explore: Seeking information or clarification
-   - express_need: Stating a problem, challenge, or goal
-   - show_interest: Showing curiosity, openness, or alignment
-   - raise_objection: Expressing doubt, concern, or disagreement
-   - decide: Ready to move forward or take action
-
-4. **CRAFT CONTEXT-SPECIFIC SUGGESTION** (35-40 words):
-   ✅ DO:
-   - Reference specific details from what they said (problems, goals, concerns)
-   - Provide ONE clear, actionable next step
-   - Use consultative, strategic language (senior sales coach tone)
-   - Make it immediately applicable to this exact conversation
-   - Write in the SAME language as the customer's input
-
-   ❌ DON'T:
-   - Give generic advice that could apply to any conversation
-   - Repeat suggestions from conversation history above
-   - Invent fake data, metrics, or case studies
-   - Use vague language like "build trust" or "add value" without specifics
-
-5. **OUTPUT**: Return ONLY valid JSON with exact keywords, in the customer's input language
-
-⚠️ CRITICAL OUTPUT FORMAT REQUIREMENTS:
-- You MUST return ONLY valid JSON, no other text
-- category field MUST be one of these exact keywords: "rapport", "discovery", "value", "objection", "closing"
-- intent field MUST be one of these exact keywords: "explore", "express_need", "show_interest", "raise_objection", "decide"
-- language field MUST be one of: "en", "it", "es", "fr", "de" (matching input language)
-- suggestion field MUST be 35-40 words in the detected language
-- Do NOT use full descriptions like "Discovery & Qualification" - use ONLY the keyword "discovery"
-
-${categoryInstructions}
+Return ONLY JSON: {"language": "${detectedLanguage}", "intent": "...", "category": "...", "suggestion": "..."}
 `;
 
   return [
