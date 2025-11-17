@@ -630,13 +630,15 @@ wss.on('connection', async (ws: WebSocket) => {
                 console.log(`📝 Transcript completo (${transcriptBuffer.length} caratteri):`);
                 console.log(`   "${transcriptBuffer}"`);
                 console.log(`📊 Confidence: ${confidence.toFixed(2)}`);
-                console.log(`🌍 Lingua rilevata: ${detectedLanguage}`);
+                console.log(`🌍 Lingua rilevata da Deepgram: ${detectedLanguage}`);
+                console.log(`   ⚠️  GPT verificherà questa lingua analizzando il testo`);
                 console.log('='.repeat(80) + '\n');
 
                 // Chiama la funzione GPT per generare suggerimenti
                 await handleGPTSuggestion(
                   transcriptBuffer,
                   ws,
+                  detectedLanguage,
                   async (category: string, suggestion: string) => {
                     // Callback per salvare il suggerimento (solo per utenti autenticati)
                     if (session.userId !== 'demo-user') {

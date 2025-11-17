@@ -73,6 +73,8 @@ const recentSuggestions = new Set<string>();
 const CACHE_DURATION_MS = 30000; // 30 sec
 const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 const MAX_HISTORY = 10;  // Aumentato da 5 a 10 per più contesto
+const recentCategories: string[] = []; // ⚡ Track last categories to detect variety issues
+const MAX_CATEGORY_HISTORY = 5;
 
 // ============================================================================
 // 🧠 handleGPTSuggestion()
@@ -80,15 +82,18 @@ const MAX_HISTORY = 10;  // Aumentato da 5 a 10 per più contesto
 export async function handleGPTSuggestion(
   transcript: string,
   ws: WebSocket,
+  detectedLanguage?: string,
   onSuggestionGenerated?: (category: string, suggestion: string) => Promise<void>
 ): Promise<void> {
   console.log(`💬 Generating suggestion for transcript: "${transcript.substring(0, 100)}..."`);
+  console.log(`🌍 Deepgram detected language: ${detectedLanguage || 'unknown'}`);
 
   try {
     const messages = buildMessages({
       transcript,
       confidence: 0.8,
       conversationHistory,
+      detectedLanguage: detectedLanguage || 'unknown',
     });
 
     const qualityMode = process.env.QUALITY_MODE || 'balanced';
@@ -158,6 +163,22 @@ export async function handleGPTSuggestion(
     const language = parsedResponse.language || 'en';
 
     console.log(`✅ Validated: category="${category}", intent="${intent}", language="${language}"`);
+
+    // ⚡ Track categories for variety detection
+    recentCategories.push(category);
+    if (recentCategories.length > MAX_CATEGORY_HISTORY) {
+      recentCategories.shift();
+    }
+
+    // ⚡ Warn if all recent categories are the same
+    if (recentCategories.length >= 3) {
+      const uniqueCategories = new Set(recentCategories);
+      if (uniqueCategories.size === 1) {
+        console.warn(`⚠️⚠️⚠️ VARIETY PROBLEM: Last ${recentCategories.length} suggestions all used category "${category}"!`);
+        console.warn(`   Recent categories: [${recentCategories.join(', ')}]`);
+        console.warn(`   GPT is not varying categories! Check if prompts are too generic.`);
+      }
+    }
 
     if (!suggestion.trim()) {
       console.log('Empty suggestion received, skipping');
@@ -229,6 +250,7 @@ export async function handleGPTSuggestion(
     console.log(`   ℹ️  GPT analyzed the TEXT content to determine this language`);
     console.log(`   ℹ️  If Deepgram detected different language, GPT correction is applied`);
     console.log(`✅ Suggestion: "${suggestion}"`);
+    console.log(`📊 Recent categories (variety check): [${recentCategories.join(', ')}]`);
     console.log('='.repeat(80) + '\n');
 
     if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
