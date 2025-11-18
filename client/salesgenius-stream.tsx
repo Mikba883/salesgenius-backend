@@ -111,18 +111,18 @@ export default function SalesGeniusStream() {
         );
       }
 
-      // 3) Setup AudioContext con sample rate nativo ad alta qualità
+      // 3) Setup AudioContext con sample rate 16kHz (compatibilità Deepgram)
       // Worklet usa buffering 4096 samples per ridurre overhead
-      const ctx = new AudioContext(); // Default 44.1kHz o 48kHz
+      const ctx = new AudioContext({ sampleRate: 16000 }); // Force 16kHz per Deepgram
       ctxRef.current = ctx;
 
-      // ⚡ Worklet ottimizzato per 48kHz con buffering e zero-copy
+      // ⚡ Worklet ottimizzato per 16kHz con buffering e zero-copy
       const workletCode = `
         class PCMWorklet extends AudioWorkletProcessor {
           constructor() {
             super();
-            // ⚡ BUFFER SIZE AUMENTATO per gestire 48kHz senza lag
-            // 4096 samples @ 48kHz = ~85ms di audio (vs 2.7ms prima)
+            // ⚡ BUFFER SIZE per 16kHz (compatibilità Deepgram)
+            // 4096 samples @ 16kHz = ~256ms di audio
             this.bufferSize = 4096;
             this.buffer = new Float32Array(this.bufferSize);
             this.bufferIndex = 0;
@@ -174,14 +174,14 @@ export default function SalesGeniusStream() {
               [pcm16Data.buffer]
             );
 
-            // Log periodico (ogni 50 buffer = ~4 secondi @ 48kHz)
+            // Log periodico (ogni 50 buffer = ~12.8 secondi @ 16kHz)
             this.frameCount++;
             if (this.frameCount % 50 === 0) {
               this.port.postMessage({
                 type: 'debug',
                 frameCount: this.frameCount,
                 bufferSize: this.bufferSize,
-                message: \`Processed \${this.frameCount} buffers (~\${(this.frameCount * this.bufferSize / 48000).toFixed(1)}s audio)\`
+                message: \`Processed \${this.frameCount} buffers (~\${(this.frameCount * this.bufferSize / 16000).toFixed(1)}s audio)\`
               });
             }
 

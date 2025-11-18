@@ -632,7 +632,7 @@ wss.on('connection', async (ws: WebSocket) => {
         try {
           deepgramConnection = deepgramClient.listen.live({
             encoding: 'linear16',      // PCM16 format
-            sample_rate: 48000,        // ⚡ 48kHz high-quality (frontend buffering ottimizzato)
+            sample_rate: 16000,        // ⚡ 16kHz standard (compatibilità Deepgram garantita)
             channels: 1,               // Mono audio
             language: 'multi',         // ⚡ Multi-language detection (auto-detect: en, it, es, fr, de, etc.)
             punctuate: true,
