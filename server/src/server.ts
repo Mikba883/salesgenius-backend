@@ -80,7 +80,7 @@ const MAX_CONNECTIONS_PER_USER = 2;
 
 // Tracking suggerimenti per rate limiting
 const userSuggestions = new Map<string, { count: number; resetTime: number }>(); // userId -> {count, resetTime}
-const MAX_SUGGESTIONS_PER_5MIN = 40; // ⚡ Aumentato da 10 a 40 per supportare conversazioni più dinamiche (con debounce 3s)
+const MAX_SUGGESTIONS_PER_5MIN = 10; // ⚡ Configurazione originale che funzionava (max ~5 suggerimenti in 3 min)
 
 // ==========================================
 // HEALTH CHECK ENDPOINTS (FIX PER RENDER)
@@ -351,7 +351,7 @@ wss.on('connection', async (ws: WebSocket) => {
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
   let lastTranscriptTime = Date.now(); // ⚡ DEAD AIR: Timestamp ultimo transcript ricevuto
-  const SUGGESTION_DEBOUNCE_MS = 3000; // ⚡ 3 secondi - aumentata frequenza per più suggerimenti durante la conversazione
+  const SUGGESTION_DEBOUNCE_MS = 10000; // ⚡ 10 secondi - configurazione originale che funzionava
   const MIN_CONFIDENCE = 0.75; // ⚡ Minima confidence per suggerimenti (0.75 = alta qualità trascrizione)
   const MIN_BUFFER_LENGTH = 25; // ⚡ 25 caratteri - cattura obiezioni brevi come "Costa troppo" o "Non mi interessa"
   const DEAD_AIR_THRESHOLD_MS = 5000; // ⚡ DEAD AIR: 5 secondi di silenzio assoluto
