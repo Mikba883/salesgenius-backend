@@ -111,76 +111,82 @@ export default function SalesGeniusStream() {
         );
       }
 
-      // 3) Setup AudioContext con sample rate nativo del sistema (44.1/48kHz) per qualità ottimale
-      // Deepgram gestirà il downsampling lato server se necessario
-      const ctx = new AudioContext(); // Usa default del sistema (44.1kHz o 48kHz)
+      // 3) Setup AudioContext con sample rate nativo ad alta qualità
+      // Worklet usa buffering 4096 samples per ridurre overhead
+      const ctx = new AudioContext(); // Default 44.1kHz o 48kHz
       ctxRef.current = ctx;
 
-      // Worklet inline per conversione PCM16 con supporto stereo
+      // ⚡ Worklet ottimizzato per 48kHz con buffering e zero-copy
       const workletCode = `
         class PCMWorklet extends AudioWorkletProcessor {
           constructor() {
             super();
+            // ⚡ BUFFER SIZE AUMENTATO per gestire 48kHz senza lag
+            // 4096 samples @ 48kHz = ~85ms di audio (vs 2.7ms prima)
+            this.bufferSize = 4096;
+            this.buffer = new Float32Array(this.bufferSize);
+            this.bufferIndex = 0;
             this.frameCount = 0;
-            this.hasAudio = false;
           }
 
           process(inputs) {
             const input = inputs[0];
             if (!input || input.length === 0) return true;
 
-            // Verifica se abbiamo almeno un canale
+            // Downmix a mono se stereo
+            const numChannels = input.length;
             const ch0 = input[0];
             if (!ch0 || ch0.length === 0) return true;
 
-            // Se l'input è stereo, fai il downmix a mono (media dei due canali)
-            const numChannels = input.length;
-            const samples = ch0.length;
-            const mono = new Float32Array(samples);
+            // Ottimizzazione: loop singolo per downmix + accumulo
+            for (let i = 0; i < ch0.length; i++) {
+              // Media dei canali se stereo
+              let sample = ch0[i];
+              if (numChannels > 1 && input[1]) {
+                sample = (sample + input[1][i]) / 2;
+              }
 
-            if (numChannels === 1) {
-              // Input mono: copia direttamente
-              mono.set(ch0);
-            } else {
-              // Input stereo o multi-canale: fai la media di tutti i canali
-              for (let i = 0; i < samples; i++) {
-                let sum = 0;
-                for (let ch = 0; ch < numChannels && ch < input.length; ch++) {
-                  if (input[ch] && input[ch][i] !== undefined) {
-                    sum += input[ch][i];
-                  }
-                }
-                mono[i] = sum / numChannels;
+              this.buffer[this.bufferIndex++] = sample;
+
+              // Flush quando buffer pieno
+              if (this.bufferIndex === this.bufferSize) {
+                this.flush();
               }
             }
 
-            // Converti in PCM16
-            const pcm = new Int16Array(samples);
-            let maxSample = 0;
-            for (let i = 0; i < samples; i++) {
-              let s = Math.max(-1, Math.min(1, mono[i]));
-              pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-              maxSample = Math.max(maxSample, Math.abs(s));
+            return true;
+          }
+
+          flush() {
+            // ⚡ Conversione Float32 -> PCM16 ottimizzata
+            const pcm16Data = new Int16Array(this.bufferSize);
+
+            for (let i = 0; i < this.bufferSize; i++) {
+              // Clamp manuale (più veloce di Math.max/min)
+              let s = this.buffer[i];
+              s = s < -1 ? -1 : (s > 1 ? 1 : s);
+              pcm16Data[i] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7FFF) | 0;
             }
 
-            // Log periodico per debug (ogni 100 frame ~ 3 secondi)
-            this.frameCount++;
-            if (maxSample > 0.01) this.hasAudio = true;
+            // ⚡ ZERO-COPY: Transferable Objects (no serialization overhead)
+            this.port.postMessage(
+              { type: 'audio', data: pcm16Data },
+              [pcm16Data.buffer]
+            );
 
-            if (this.frameCount % 100 === 0) {
+            // Log periodico (ogni 50 buffer = ~4 secondi @ 48kHz)
+            this.frameCount++;
+            if (this.frameCount % 50 === 0) {
               this.port.postMessage({
                 type: 'debug',
                 frameCount: this.frameCount,
-                channels: numChannels,
-                samples: samples,
-                maxSample: maxSample.toFixed(4),
-                hasAudio: this.hasAudio
+                bufferSize: this.bufferSize,
+                message: \`Processed \${this.frameCount} buffers (~\${(this.frameCount * this.bufferSize / 48000).toFixed(1)}s audio)\`
               });
             }
 
-            // Invia i dati audio
-            this.port.postMessage({ type: 'audio', data: pcm });
-            return true;
+            // Reset index (no realloc)
+            this.bufferIndex = 0;
           }
         }
         registerProcessor('pcm-worklet', PCMWorklet);
@@ -199,20 +205,12 @@ export default function SalesGeniusStream() {
       if (audioTrack) {
         const displaySource = ctx.createMediaStreamSource(dispStream);
         const displayGain = ctx.createGain();
-        displayGain.gain.value = 1.0; // Volume normale per playback diretto
+        displayGain.gain.value = 1.2; // Volume audio condivisione leggermente aumentato
         displaySource.connect(displayGain);
-
-        // ⚡ CONNESSIONE DIRETTA AGLI SPEAKERS (elimina distorsione)
-        // L'utente sente l'audio del tab in alta qualità
-        displayGain.connect(ctx.destination);
-
-        // ⚡ CONNESSIONE AL MIXER per invio a Deepgram
         displayGain.connect(mixer);
-
         console.log('🔊 Audio condivisione schermo connesso');
         console.log(`   - Canali: ${displaySource.channelCount}`);
-        console.log(`   - Sample rate nativo: ${ctx.sampleRate}Hz (alta qualità)`);
-        console.log(`   - ✅ Output diretto agli speakers abilitato`);
+        console.log(`   - Sample rate: ${ctx.sampleRate}Hz`);
       }
 
       // Connetti audio dal microfono (se presente)
