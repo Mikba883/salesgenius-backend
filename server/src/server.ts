@@ -255,40 +255,74 @@ async function authenticateUser(authToken: string): Promise<{ userId: string; is
 }
 
 /**
- * Salva un suggerimento nella tabella sales_events
+ * Salva un suggerimento nella tabella sales_events con metadati completi per re-training AI
+ *
+ * ⚡ IMPORTANTE: Questa funzione è NON-BLOCCANTE (fire-and-forget)
+ * Non usare await quando la chiami per evitare latenza allo streaming
  */
 async function saveSuggestion(
   session: UserSession,
-  category: string,
-  suggestion: string,
-  transcriptContext: string,
-  confidence: number
+  data: {
+    category: string;
+    intent: string;
+    suggestion: string;
+    transcript: string;
+    confidence: number;
+    language: string;
+    tokensUsed: number;
+    model: string;
+    latencyMs: number;
+    confidenceThreshold: number;
+    meetingId?: string;
+    organizationId?: string;
+  }
 ): Promise<void> {
   try {
     const { error } = await supabaseAdmin
       .from('sales_events')
       .insert({
+        // Identificatori
         id: crypto.randomUUID(),
+        organization_id: data.organizationId || null,
         user_id: session.userId,
-        session_id: session.sessionId,
-        category,
-        suggestion,
-        transcript_context: transcriptContext,
-        confidence,
+        meeting_id: data.meetingId || session.sessionId,
+
+        // Dati conversazione (verranno anonimizzati dal trigger trg_sales_events_redact)
+        transcript: data.transcript,
+        confidence: data.confidence,
+        language: data.language,
+
+        // AI Metadata (cruciali per re-training)
+        intent: data.intent,
+        category: data.category,
+        suggestion: data.suggestion,
+
+        // Performance Metrics
+        latency_ms: data.latencyMs,
+        tokens_used: data.tokensUsed,
+        model: data.model,
+        confidence_threshold: data.confidenceThreshold,
+
+        // Timestamp
         created_at: new Date().toISOString(),
+
+        // Extra metadata per analytics dettagliate
         metadata: {
-          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-          processing_time_ms: Date.now() - session.startTime.getTime()
+          model: data.model,
+          total_latency_ms: data.latencyMs,
+          tokens_used: data.tokensUsed,
+          confidence_threshold: data.confidenceThreshold,
+          session_duration_ms: Date.now() - session.startTime.getTime()
         }
       });
 
     if (error) {
-      console.error('Error saving suggestion:', error);
+      console.error('❌ Error saving sales_event:', error);
     } else {
-      console.log(`💾 Suggestion saved: [${category}] ${suggestion.substring(0, 50)}...`);
+      console.log(`💾 Sales event saved: [${data.category}/${data.intent}] tokens=${data.tokensUsed}, latency=${data.latencyMs}ms`);
     }
   } catch (error) {
-    console.error('Unexpected error saving suggestion:', error);
+    console.error('❌ Unexpected error saving sales_event:', error);
   }
 }
 
@@ -341,20 +375,30 @@ wss.on('connection', async (ws: WebSocket) => {
           // Prompt specifico per dead air
           const reEngagementPrompt = `The conversation has gone silent for 5+ seconds after this: "${transcriptBuffer.slice(-200)}". Suggest a polite, open-ended question to re-engage the prospect and continue the discussion naturally.`;
 
-          await handleGPTSuggestion(
+          // ⚡ Track timing per metrics
+          const deadAirStart = Date.now();
+
+          const result = await handleGPTSuggestion(
             reEngagementPrompt,
             ws,
             'en', // Default a inglese, GPT rileverà la lingua corretta
-            async (category: string, suggestion: string) => {
-              // Salva suggerimento solo per utenti autenticati
+            async (category: string, suggestion: string, intent: string, language: string, tokensUsed: number) => {
+              // ⚡ Salva suggerimento solo per utenti autenticati (FIRE-AND-FORGET, no await)
               if (session.userId !== 'demo-user') {
-                await saveSuggestion(
-                  session,
-                  'rapport', // Dead air = ricostruire rapport
+                const deadAirLatency = Date.now() - deadAirStart;
+
+                saveSuggestion(session, {
+                  category,
+                  intent,
                   suggestion,
-                  transcriptBuffer.slice(-500),
-                  0.9 // Alta confidence per suggerimento automatico
-                );
+                  transcript: transcriptBuffer.slice(-500),
+                  confidence: 0.9, // Alta confidence per suggerimento automatico
+                  language,
+                  tokensUsed,
+                  model: 'gpt-4o-mini',
+                  latencyMs: deadAirLatency,
+                  confidenceThreshold: MIN_CONFIDENCE
+                }).catch(err => console.error('Error logging dead air event:', err));
               }
             }
           );
@@ -702,19 +746,30 @@ wss.on('connection', async (ws: WebSocket) => {
                       if (timeSinceLastSuggestion > 3000) { // Reduced debounce per domande smart
                         lastSuggestionTime = Date.now();
 
-                        await handleGPTSuggestion(
+                        // ⚡ Track timing per metrics
+                        const smartContextStart = Date.now();
+
+                        const result = await handleGPTSuggestion(
                           transcript, // Usa solo la domanda, non tutto il buffer
                           ws,
                           detectedLanguage,
-                          async (category: string, suggestion: string) => {
+                          async (category: string, suggestion: string, intent: string, language: string, tokensUsed: number) => {
+                            // ⚡ Salva evento (FIRE-AND-FORGET, no await)
                             if (session.userId !== 'demo-user') {
-                              await saveSuggestion(
-                                session,
+                              const smartContextLatency = Date.now() - smartContextStart;
+
+                              saveSuggestion(session, {
                                 category,
+                                intent,
                                 suggestion,
                                 transcript,
-                                confidence
-                              );
+                                confidence,
+                                language,
+                                tokensUsed,
+                                model: 'gpt-4o-mini',
+                                latencyMs: smartContextLatency,
+                                confidenceThreshold: MIN_CONFIDENCE
+                              }).catch(err => console.error('Error logging smart context event:', err));
                             }
                           }
                         );
@@ -811,21 +866,32 @@ wss.on('connection', async (ws: WebSocket) => {
                 console.log(`   ⚠️  GPT verificherà questa lingua analizzando il testo`);
                 console.log('='.repeat(80) + '\n');
 
+                // ⚡ Track timing per metrics dettagliate
+                const suggestionStartTime = Date.now();
+
                 // Chiama la funzione GPT per generare suggerimenti
-                await handleGPTSuggestion(
+                const result = await handleGPTSuggestion(
                   transcriptBuffer,
                   ws,
                   detectedLanguage,
-                  async (category: string, suggestion: string) => {
-                    // Callback per salvare il suggerimento (solo per utenti autenticati)
+                  async (category: string, suggestion: string, intent: string, language: string, tokensUsed: number) => {
+                    // ⚡ Callback per salvare il suggerimento (solo per utenti autenticati)
+                    // FIRE-AND-FORGET: non usare await per zero latenza
                     if (session.userId !== 'demo-user') {
-                      await saveSuggestion(
-                        session,
+                      const totalLatency = Date.now() - suggestionStartTime;
+
+                      saveSuggestion(session, {
                         category,
+                        intent,
                         suggestion,
-                        transcriptBuffer.slice(-500), // Ultimi 500 caratteri di contesto
-                        confidence
-                      );
+                        transcript: transcriptBuffer.slice(-500), // Ultimi 500 caratteri di contesto
+                        confidence,
+                        language,
+                        tokensUsed,
+                        model: result?.model || 'gpt-4o-mini',
+                        latencyMs: totalLatency,
+                        confidenceThreshold: MIN_CONFIDENCE
+                      }).catch(err => console.error('Error logging suggestion event:', err));
                     }
                   }
                 );
