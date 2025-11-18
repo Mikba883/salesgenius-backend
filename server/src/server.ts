@@ -80,7 +80,7 @@ const MAX_CONNECTIONS_PER_USER = 2;
 
 // Tracking suggerimenti per rate limiting
 const userSuggestions = new Map<string, { count: number; resetTime: number }>(); // userId -> {count, resetTime}
-const MAX_SUGGESTIONS_PER_5MIN = 10;
+const MAX_SUGGESTIONS_PER_3MIN = 5; // ⚡ Ridotto a 5 suggerimenti ogni 3 minuti per controllo costi
 
 // ==========================================
 // HEALTH CHECK ENDPOINTS (FIX PER RENDER)
@@ -835,17 +835,17 @@ wss.on('connection', async (ws: WebSocket) => {
                   const currentTime = Date.now();
 
                   if (!userStats || currentTime > userStats.resetTime) {
-                    // Reset contatore ogni 5 minuti
+                    // Reset contatore ogni 3 minuti
                     userSuggestions.set(session.userId, {
                       count: 0,
-                      resetTime: currentTime + 5 * 60 * 1000
+                      resetTime: currentTime + 3 * 60 * 1000
                     });
                   }
 
                   const stats = userSuggestions.get(session.userId)!;
 
-                  if (stats.count >= MAX_SUGGESTIONS_PER_5MIN) {
-                    console.log(`⚠️ User ${session.userId} exceeded suggestion rate limit (${stats.count}/${MAX_SUGGESTIONS_PER_5MIN})`);
+                  if (stats.count >= MAX_SUGGESTIONS_PER_3MIN) {
+                    console.log(`⚠️ User ${session.userId} exceeded suggestion rate limit (${stats.count}/${MAX_SUGGESTIONS_PER_3MIN})`);
                     ws.send(JSON.stringify({
                       type: 'rate_limit',
                       message: 'Rate limit reached. Please wait a few minutes.',
@@ -856,7 +856,7 @@ wss.on('connection', async (ws: WebSocket) => {
 
                   // Incrementa contatore
                   stats.count++;
-                  console.log(`📊 Suggestion ${stats.count}/${MAX_SUGGESTIONS_PER_5MIN} for user ${session.userId}`);
+                  console.log(`📊 Suggestion ${stats.count}/${MAX_SUGGESTIONS_PER_3MIN} for user ${session.userId}`);
                 }
 
                 lastSuggestionTime = now;
