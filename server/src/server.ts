@@ -893,7 +893,7 @@ wss.on('connection', async (ws: WebSocket) => {
                   transcriptBuffer,
                   ws,
                   detectedLanguage,
-                  async (category: string, suggestion: string, intent: string, language: string, tokensUsed: number) => {
+                  async (category: string, suggestion: string, intent: string, language: string, tokensUsed: number, model: string) => {
                     // ⚡ Callback per salvare il suggerimento (solo per utenti autenticati)
                     // FIRE-AND-FORGET: non usare await per zero latenza
                     if (session.userId !== 'demo-user') {
@@ -907,7 +907,7 @@ wss.on('connection', async (ws: WebSocket) => {
                         confidence,
                         language,
                         tokensUsed,
-                        model: result?.model || 'gpt-4o-mini',
+                        model: model, // ✅ Ora ricevuto come parametro!
                         latencyMs: totalLatency,
                         confidenceThreshold: MIN_CONFIDENCE
                       }).catch(err => console.error('Error logging suggestion event:', err));
