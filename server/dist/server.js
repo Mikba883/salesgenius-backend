@@ -10,7 +10,11 @@ const dotenv_1 = require("dotenv");
 const gpt_handler_1 = require("./gpt-handler");
 const supabase_js_1 = require("@supabase/supabase-js");
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
+const openai_1 = __importDefault(require("openai"));
 (0, dotenv_1.config)();
+const openai = new openai_1.default({
+    apiKey: process.env.OPENAI_API_KEY,
+});
 const supabaseAuth = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const supabaseAdmin = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const activeSessions = new Map();
@@ -214,9 +218,11 @@ wss.on('connection', async (ws) => {
     let audioPacketsReceived = 0;
     let transcriptBuffer = '';
     let lastSuggestionTime = 0;
+    let lastTranscriptTime = Date.now();
     const SUGGESTION_DEBOUNCE_MS = 10000;
     const MIN_CONFIDENCE = 0.75;
     const MIN_BUFFER_LENGTH = 25;
+    const DEAD_AIR_THRESHOLD_MS = 5000;
     const CRITICAL_OBJECTION_PHRASES = [
         'costa troppo', 'troppo caro', 'troppo costoso', 'non mi interessa', 'ci devo pensare',
         'non ho budget', 'non abbiamo soldi', 'troppo per noi', 'fuori budget',
@@ -224,6 +230,37 @@ wss.on('connection', async (ws) => {
         'can\'t afford', 'too costly', 'out of budget'
     ];
     let currentUserId = null;
+    let deadAirCheckSent = false;
+    let lastSpeaker = null;
+    const deadAirTimer = setInterval(async () => {
+        const timeSinceLastTranscript = Date.now() - lastTranscriptTime;
+        if (timeSinceLastTranscript > DEAD_AIR_THRESHOLD_MS && !deadAirCheckSent && transcriptBuffer.length > 0) {
+            console.log(`\n${'='.repeat(80)}`);
+            console.log('🔇 DEAD AIR DETECTED - 5 secondi di silenzio');
+            console.log(`   Time since last transcript: ${(timeSinceLastTranscript / 1000).toFixed(1)}s`);
+            console.log(`   Buffer: "${transcriptBuffer.substring(0, 100)}..."`);
+            console.log(`${'='.repeat(80)}\n`);
+            deadAirCheckSent = true;
+            const session = activeSessions.get(ws);
+            if (session) {
+                try {
+                    const reEngagementPrompt = `The conversation has gone silent for 5+ seconds after this: "${transcriptBuffer.slice(-200)}". Suggest a polite, open-ended question to re-engage the prospect and continue the discussion naturally.`;
+                    await (0, gpt_handler_1.handleGPTSuggestion)(reEngagementPrompt, ws, 'en', async (category, suggestion) => {
+                        if (session.userId !== 'demo-user') {
+                            await saveSuggestion(session, 'rapport', suggestion, transcriptBuffer.slice(-500), 0.9);
+                        }
+                    });
+                    lastSuggestionTime = Date.now();
+                }
+                catch (error) {
+                    console.error('❌ Error generating dead air suggestion:', error);
+                }
+            }
+        }
+        if (timeSinceLastTranscript <= DEAD_AIR_THRESHOLD_MS) {
+            deadAirCheckSent = false;
+        }
+    }, 2000);
     ws.on('message', async (message) => {
         console.log(`📨 RAW MESSAGE: ${message.length} bytes, isBuffer: ${Buffer.isBuffer(message)}`);
         try {
@@ -391,12 +428,13 @@ wss.on('connection', async (ws) => {
                 try {
                     deepgramConnection = deepgramClient.listen.live({
                         encoding: 'linear16',
-                        sample_rate: 16000,
+                        sample_rate: 48000,
                         channels: 1,
                         language: 'multi',
                         punctuate: true,
                         smart_format: true,
                         model: 'nova-2',
+                        diarize: true,
                         interim_results: true,
                         utterance_end_ms: 3000,
                         endpointing: 600,
@@ -438,7 +476,66 @@ wss.on('connection', async (ws) => {
                         console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);
                         if (isFinal) {
                             transcriptBuffer += ' ' + transcript;
+                            lastTranscriptTime = Date.now();
                             console.log(`📊 Buffer length: ${transcriptBuffer.length} chars`);
+                            const currentSpeaker = data.channel?.alternatives[0]?.words?.[0]?.speaker ?? null;
+                            const isQuestion = transcript.trim().endsWith('?');
+                            const speakerChanged = lastSpeaker !== null && currentSpeaker !== null && lastSpeaker !== currentSpeaker;
+                            console.log(`🎭 Speaker info - Current: ${currentSpeaker}, Last: ${lastSpeaker}, Changed: ${speakerChanged}, IsQuestion: ${isQuestion}`);
+                            if (currentSpeaker !== null) {
+                                lastSpeaker = currentSpeaker;
+                            }
+                            if (isQuestion && speakerChanged && confidence >= MIN_CONFIDENCE) {
+                                console.log(`\n${'='.repeat(80)}`);
+                                console.log('❓ SMART CONTEXT: Customer question detected');
+                                console.log(`   Question: "${transcript}"`);
+                                console.log(`   Speaker: ${currentSpeaker} (previous: ${lastSpeaker})`);
+                                console.log(`${'='.repeat(80)}\n`);
+                                const session = activeSessions.get(ws);
+                                if (session) {
+                                    try {
+                                        console.log('🔍 Calling GPT for smart evaluation...');
+                                        const evaluationResponse = await openai.chat.completions.create({
+                                            model: 'gpt-4o-mini',
+                                            messages: [
+                                                {
+                                                    role: 'system',
+                                                    content: 'You are a sales context analyzer. Determine if a customer question requires factual data/research to answer.'
+                                                },
+                                                {
+                                                    role: 'user',
+                                                    content: `Is this a direct technical question from the prospect asking about price, features, ROI, guarantees, or comparisons that would benefit from real market data?\n\nQuestion: "${transcript}"\n\nRespond with JSON: {"needs_data": true/false, "category": "value|objection|rapport|discovery|closing", "reason": "brief explanation"}`
+                                                }
+                                            ],
+                                            response_format: { type: 'json_object' },
+                                            temperature: 0.3,
+                                            max_tokens: 150,
+                                        });
+                                        const evaluation = JSON.parse(evaluationResponse.choices[0]?.message?.content || '{}');
+                                        console.log(`✅ GPT Evaluation:`, JSON.stringify(evaluation, null, 2));
+                                        if (evaluation.needs_data && (evaluation.category === 'value' || evaluation.category === 'objection')) {
+                                            console.log(`🔎 VALUE/OBJECTION question → Activating Tavily search`);
+                                            const timeSinceLastSuggestion = Date.now() - lastSuggestionTime;
+                                            if (timeSinceLastSuggestion > 3000) {
+                                                lastSuggestionTime = Date.now();
+                                                await (0, gpt_handler_1.handleGPTSuggestion)(transcript, ws, detectedLanguage, async (category, suggestion) => {
+                                                    if (session.userId !== 'demo-user') {
+                                                        await saveSuggestion(session, category, suggestion, transcript, confidence);
+                                                    }
+                                                });
+                                                return;
+                                            }
+                                        }
+                                        else {
+                                            console.log(`ℹ️  ${evaluation.category?.toUpperCase()} question → Skipping (no data needed)`);
+                                            console.log(`   Reason: ${evaluation.reason}`);
+                                        }
+                                    }
+                                    catch (error) {
+                                        console.error('❌ Error in smart context evaluation:', error);
+                                    }
+                                }
+                            }
                             const now = Date.now();
                             const timeSinceLastSuggestion = now - lastSuggestionTime;
                             const transcriptLower = transcript.toLowerCase();
@@ -570,6 +667,10 @@ wss.on('connection', async (ws) => {
     });
     ws.on('close', async () => {
         console.log('👋 WebSocket connection closed');
+        if (deadAirTimer) {
+            clearInterval(deadAirTimer);
+            console.log('🧹 Dead air timer cleared');
+        }
         if (currentUserId) {
             const connections = userConnections.get(currentUserId) || 0;
             if (connections > 0) {
