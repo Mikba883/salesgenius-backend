@@ -293,8 +293,32 @@ Remind seller to look up specific statistics relevant to customer's industry.
       intent = 'explore';
     }
 
-    const suggestion = parsedResponse.suggestion || '';
+    let suggestion = parsedResponse.suggestion || '';
     const language = parsedResponse.language || 'en';
+
+    // ⚡ FALLBACK: If suggestion is empty, GPT might have put text in wrong field
+    if (!suggestion || suggestion.trim().length === 0) {
+      console.warn('⚠️ Suggestion field is empty, searching for text in other JSON fields...');
+
+      // Look for the longest string value in the response (likely the suggestion)
+      const allValues = Object.entries(parsedResponse)
+        .filter(([key, value]) =>
+          typeof value === 'string' &&
+          value.length > 20 &&
+          !['language', 'intent', 'category'].includes(key)
+        )
+        .map(([key, value]) => ({ key, value: value as string, length: (value as string).length }))
+        .sort((a, b) => b.length - a.length);
+
+      if (allValues.length > 0) {
+        const recovered = allValues[0];
+        suggestion = `${recovered.key} ${recovered.value}`.trim();
+        console.warn(`✅ RECOVERED suggestion from field "${recovered.key}": "${suggestion.substring(0, 80)}..."`);
+      } else {
+        console.error('❌ Could not find any valid suggestion text in GPT response');
+        console.error('   Full response:', JSON.stringify(parsedResponse, null, 2));
+      }
+    }
 
     // ⚡ TRACK TOKENS USED (per monitoraggio costi e re-training)
     const tokensUsed = completion.usage?.total_tokens || 0;
@@ -318,8 +342,9 @@ Remind seller to look up specific statistics relevant to customer's industry.
       }
     }
 
-    if (!suggestion.trim()) {
-      console.log('Empty suggestion received, skipping');
+    // ⚡ Final check: If still empty after fallback, skip
+    if (!suggestion || suggestion.trim().length === 0) {
+      console.error('❌ Empty suggestion after fallback attempts, skipping');
       return;
     }
 

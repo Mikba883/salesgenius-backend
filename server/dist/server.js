@@ -182,6 +182,9 @@ async function authenticateUser(authToken) {
 }
 async function saveSuggestion(session, data) {
     try {
+        console.log(`📤 Attempting to save sales_event to Supabase: [${data.category}/${data.intent}]`);
+        console.log(`   User: ${session.userId}, Meeting: ${data.meetingId || session.sessionId}`);
+        console.log(`   SUPABASE_SERVICE_KEY present: ${process.env.SUPABASE_SERVICE_KEY ? 'YES' : 'NO ⚠️'}`);
         const { error } = await supabaseAdmin
             .from('sales_events')
             .insert({
@@ -209,14 +212,23 @@ async function saveSuggestion(session, data) {
             }
         });
         if (error) {
-            console.error('❌ Error saving sales_event:', error);
+            console.error('❌ Supabase save FAILED!');
+            console.error('   Error code:', error.code);
+            console.error('   Error message:', error.message);
+            console.error('   Error details:', error.details);
+            console.error('   Full error:', JSON.stringify(error, null, 2));
         }
         else {
-            console.log(`💾 Sales event saved: [${data.category}/${data.intent}] tokens=${data.tokensUsed}, latency=${data.latencyMs}ms`);
+            console.log(`✅ Sales event saved successfully to Supabase`);
+            console.log(`   Category/Intent: [${data.category}/${data.intent}]`);
+            console.log(`   Metrics: tokens=${data.tokensUsed}, latency=${data.latencyMs}ms`);
         }
     }
     catch (error) {
-        console.error('❌ Unexpected error saving sales_event:', error);
+        console.error('❌ Unexpected exception saving sales_event!');
+        console.error('   Error type:', error?.constructor?.name);
+        console.error('   Error message:', error?.message);
+        console.error('   Stack trace:', error?.stack);
     }
 }
 wss.on('connection', async (ws) => {
@@ -451,7 +463,7 @@ wss.on('connection', async (ws) => {
                 try {
                     deepgramConnection = deepgramClient.listen.live({
                         encoding: 'linear16',
-                        sample_rate: 48000,
+                        sample_rate: 16000,
                         channels: 1,
                         language: 'multi',
                         punctuate: true,
@@ -459,8 +471,8 @@ wss.on('connection', async (ws) => {
                         model: 'nova-2',
                         diarize: true,
                         interim_results: true,
-                        utterance_end_ms: 3000,
-                        endpointing: 600,
+                        utterance_end_ms: 1500,
+                        endpointing: 400,
                         vad_events: true,
                     });
                     console.log('✅ Deepgram connection object created successfully');
@@ -625,7 +637,7 @@ wss.on('connection', async (ws) => {
                                 console.log(`   ⚠️  GPT verificherà questa lingua analizzando il testo`);
                                 console.log('='.repeat(80) + '\n');
                                 const suggestionStartTime = Date.now();
-                                const result = await (0, gpt_handler_1.handleGPTSuggestion)(transcriptBuffer, ws, detectedLanguage, async (category, suggestion, intent, language, tokensUsed) => {
+                                const result = await (0, gpt_handler_1.handleGPTSuggestion)(transcriptBuffer, ws, detectedLanguage, async (category, suggestion, intent, language, tokensUsed, model) => {
                                     if (session.userId !== 'demo-user') {
                                         const totalLatency = Date.now() - suggestionStartTime;
                                         saveSuggestion(session, {
@@ -636,7 +648,7 @@ wss.on('connection', async (ws) => {
                                             confidence,
                                             language,
                                             tokensUsed,
-                                            model: result?.model || 'gpt-4o-mini',
+                                            model: model,
                                             latencyMs: totalLatency,
                                             confidenceThreshold: MIN_CONFIDENCE
                                         }).catch(err => console.error('Error logging suggestion event:', err));

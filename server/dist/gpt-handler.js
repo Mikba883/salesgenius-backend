@@ -61,28 +61,33 @@ async function handleGPTSuggestion(transcript, ws, detectedLanguage, onSuggestio
         console.log(`🔎 VALUE question check: ${isValueQuestion ? 'YES - Will fetch Tavily data' : 'NO - Skipping Tavily'}`);
         if (isValueQuestion) {
             console.log('🔍 VALUE question detected - fetching real market data from Tavily...');
-            console.log(`🔑 Tavily API Key present: ${process.env.TAVILY_API_KEY ? 'YES' : 'NO'}`);
-            try {
-                const searchQuery = `B2B sales ROI statistics industry benchmarks ${transcript.substring(0, 100)}`;
-                console.log(`📡 Tavily search query: "${searchQuery}"`);
-                console.log(`⏱️  Starting Tavily API call with 5s timeout...`);
-                const searchPromise = tavilyClient.search(searchQuery, {
-                    searchDepth: 'basic',
-                    maxResults: 3,
-                    includeAnswer: true,
-                });
-                const searchTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Tavily search timeout')), 5000));
-                const response = await Promise.race([searchPromise, searchTimeout]);
-                console.log(`✅ Tavily API call completed successfully`);
-                console.log(`✅ Tavily returned ${response.results?.length || 0} results`);
-                if (response.results && response.results.length > 0) {
-                    const sources = response.results.map((r) => ({
-                        title: r.title,
-                        url: r.url,
-                        content: r.content?.substring(0, 200) || '',
-                        score: r.score
-                    }));
-                    marketDataContext = `
+            console.log(`🔑 Tavily API Key present: ${process.env.TAVILY_API_KEY ? 'YES' : 'NO ⚠️'}`);
+            if (!process.env.TAVILY_API_KEY) {
+                console.error('❌ TAVILY_API_KEY not configured! Skipping web search.');
+                marketDataContext = '';
+            }
+            else {
+                try {
+                    const searchQuery = `B2B sales ROI statistics industry benchmarks ${transcript.substring(0, 100)}`;
+                    console.log(`📡 Tavily search query: "${searchQuery}"`);
+                    console.log(`⏱️  Starting Tavily API call with 5s timeout...`);
+                    const searchPromise = tavilyClient.search(searchQuery, {
+                        searchDepth: 'basic',
+                        maxResults: 3,
+                        includeAnswer: true,
+                    });
+                    const searchTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Tavily search timeout')), 5000));
+                    const response = await Promise.race([searchPromise, searchTimeout]);
+                    console.log(`✅ Tavily API call completed successfully`);
+                    console.log(`✅ Tavily returned ${response.results?.length || 0} results`);
+                    if (response.results && response.results.length > 0) {
+                        const sources = response.results.map((r) => ({
+                            title: r.title,
+                            url: r.url,
+                            content: r.content?.substring(0, 200) || '',
+                            score: r.score
+                        }));
+                        marketDataContext = `
 📊 REAL MARKET DATA (from Tavily Web Search):
 
 ${response.answer ? `Quick Answer: ${response.answer}\n` : ''}
@@ -95,24 +100,26 @@ ${sources.map((s, i) => `${i + 1}. ${s.title}
 ⚠️ IMPORTANT: Use these REAL statistics in your suggestion. Cite the source URLs.
 Guide seller to reference these specific data points when answering customer.
 `;
-                    console.log('✅ Market data context prepared with real Tavily results');
-                }
-                else {
-                    marketDataContext = `
+                        console.log('✅ Market data context prepared with real Tavily results');
+                    }
+                    else {
+                        marketDataContext = `
 📊 MARKET DATA: Guide seller to reference recent industry research.
 Common sources: Gartner, McKinsey, Forrester, IDC, industry-specific reports.
 Remind seller to look up specific statistics relevant to customer's industry.
 `;
-                    console.log('⚠️ Tavily returned no results, using generic guidance');
+                        console.log('⚠️ Tavily returned no results, using generic guidance');
+                    }
                 }
-            }
-            catch (error) {
-                console.error(`❌ Tavily search FAILED!`);
-                console.error(`   Error type: ${error.constructor.name}`);
-                console.error(`   Error message: ${error.message}`);
-                console.error(`   Full error:`, error);
-                console.log(`⚠️ Proceeding without market data`);
-                marketDataContext = '';
+                catch (error) {
+                    console.error(`❌ Tavily search FAILED!`);
+                    console.error(`   Error type: ${error.constructor?.name || 'Unknown'}`);
+                    console.error(`   Error message: ${error.message}`);
+                    console.error(`   Stack trace:`, error.stack);
+                    console.error(`   Full error object:`, JSON.stringify(error, null, 2));
+                    console.log(`⚠️ Proceeding without market data`);
+                    marketDataContext = '';
+                }
             }
         }
         else {
@@ -175,8 +182,26 @@ Remind seller to look up specific statistics relevant to customer's industry.
             console.warn(`⚠️ Invalid intent "${parsedResponse.intent}" received from GPT. Defaulting to 'explore'. Valid intents: ${VALID_INTENTS.join(', ')}`);
             intent = 'explore';
         }
-        const suggestion = parsedResponse.suggestion || '';
+        let suggestion = parsedResponse.suggestion || '';
         const language = parsedResponse.language || 'en';
+        if (!suggestion || suggestion.trim().length === 0) {
+            console.warn('⚠️ Suggestion field is empty, searching for text in other JSON fields...');
+            const allValues = Object.entries(parsedResponse)
+                .filter(([key, value]) => typeof value === 'string' &&
+                value.length > 20 &&
+                !['language', 'intent', 'category'].includes(key))
+                .map(([key, value]) => ({ key, value: value, length: value.length }))
+                .sort((a, b) => b.length - a.length);
+            if (allValues.length > 0) {
+                const recovered = allValues[0];
+                suggestion = `${recovered.key} ${recovered.value}`.trim();
+                console.warn(`✅ RECOVERED suggestion from field "${recovered.key}": "${suggestion.substring(0, 80)}..."`);
+            }
+            else {
+                console.error('❌ Could not find any valid suggestion text in GPT response');
+                console.error('   Full response:', JSON.stringify(parsedResponse, null, 2));
+            }
+        }
         const tokensUsed = completion.usage?.total_tokens || 0;
         const modelUsed = qualitySettings.model;
         console.log(`✅ Validated: category="${category}", intent="${intent}", language="${language}", tokens=${tokensUsed}`);
@@ -192,8 +217,8 @@ Remind seller to look up specific statistics relevant to customer's industry.
                 console.warn(`   GPT is not varying categories! Check if prompts are too generic.`);
             }
         }
-        if (!suggestion.trim()) {
-            console.log('Empty suggestion received, skipping');
+        if (!suggestion || suggestion.trim().length === 0) {
+            console.error('❌ Empty suggestion after fallback attempts, skipping');
             return;
         }
         const suggestionKey = `${category}:${suggestion.substring(0, 60)}`;
@@ -254,7 +279,7 @@ Remind seller to look up specific statistics relevant to customer's industry.
         console.log(`🔢 Tokens used: ${tokensUsed}`);
         console.log('='.repeat(80) + '\n');
         if (onSuggestionGenerated) {
-            await onSuggestionGenerated(category, suggestion, intent, language, tokensUsed);
+            await onSuggestionGenerated(category, suggestion, intent, language, tokensUsed, modelUsed);
         }
         return {
             category,
