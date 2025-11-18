@@ -132,7 +132,7 @@ export async function handleGPTSuggestion(
   transcript: string,
   ws: WebSocket,
   detectedLanguage?: string,
-  onSuggestionGenerated?: (category: string, suggestion: string, intent: string, language: string, tokensUsed: number) => Promise<void>
+  onSuggestionGenerated?: (category: string, suggestion: string, intent: string, language: string, tokensUsed: number, model: string) => Promise<void>
 ): Promise<SuggestionResult | void> {
   console.log(`💬 Generating suggestion for transcript: "${transcript.substring(0, 100)}..."`);
   console.log(`🌍 Deepgram detected language: ${detectedLanguage || 'unknown'}`);
@@ -401,7 +401,7 @@ Remind seller to look up specific statistics relevant to customer's industry.
 
     // ⚡ Callback per salvare il suggerimento (con nuovi parametri)
     if (onSuggestionGenerated) {
-      await onSuggestionGenerated(category, suggestion, intent, language, tokensUsed);
+      await onSuggestionGenerated(category, suggestion, intent, language, tokensUsed, modelUsed);
     }
 
     // ⚡ Return SuggestionResult per tracking metadati completi
