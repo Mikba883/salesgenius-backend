@@ -211,9 +211,18 @@ wss.on('connection', async (ws) => {
     let deepgramReady = false;
     let audioBuffer = [];
     let audioPacketsSent = 0;
+    let audioPacketsReceived = 0;
     let transcriptBuffer = '';
     let lastSuggestionTime = 0;
     const SUGGESTION_DEBOUNCE_MS = 10000;
+    const MIN_CONFIDENCE = 0.75;
+    const MIN_BUFFER_LENGTH = 25;
+    const CRITICAL_OBJECTION_PHRASES = [
+        'costa troppo', 'troppo caro', 'troppo costoso', 'non mi interessa', 'ci devo pensare',
+        'non ho budget', 'non abbiamo soldi', 'troppo per noi', 'fuori budget',
+        'too expensive', 'too much', 'not interested', 'need to think', 'no budget',
+        'can\'t afford', 'too costly', 'out of budget'
+    ];
     let currentUserId = null;
     ws.on('message', async (message) => {
         console.log(`📨 RAW MESSAGE: ${message.length} bytes, isBuffer: ${Buffer.isBuffer(message)}`);
@@ -384,7 +393,7 @@ wss.on('connection', async (ws) => {
                         encoding: 'linear16',
                         sample_rate: 16000,
                         channels: 1,
-                        language: 'it',
+                        language: 'multi',
                         punctuate: true,
                         smart_format: true,
                         model: 'nova-2',
@@ -423,7 +432,8 @@ wss.on('connection', async (ws) => {
                     const transcript = data.channel?.alternatives[0]?.transcript;
                     const isFinal = data.is_final;
                     const confidence = data.channel?.alternatives[0]?.confidence || 0;
-                    console.log(`🔍 Transcript details - Text: "${transcript}", isFinal: ${isFinal}, confidence: ${confidence}`);
+                    const detectedLanguage = data.channel?.alternatives[0]?.language || data.channel?.detected_language || 'unknown';
+                    console.log(`🔍 Transcript details - Text: "${transcript}", isFinal: ${isFinal}, confidence: ${confidence}, language: ${detectedLanguage}`);
                     if (transcript && transcript.length > 0) {
                         console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);
                         if (isFinal) {
@@ -431,11 +441,22 @@ wss.on('connection', async (ws) => {
                             console.log(`📊 Buffer length: ${transcriptBuffer.length} chars`);
                             const now = Date.now();
                             const timeSinceLastSuggestion = now - lastSuggestionTime;
-                            console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)}, bufferLen=${transcriptBuffer.length}, timeSince=${timeSinceLastSuggestion}ms, debounce=${SUGGESTION_DEBOUNCE_MS}ms`);
-                            if (confidence >= 0.65 &&
-                                transcriptBuffer.length > 80 &&
-                                timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS) {
-                                console.log('✅ Conditions met, generating suggestion...');
+                            const transcriptLower = transcript.toLowerCase();
+                            const isCriticalObjection = CRITICAL_OBJECTION_PHRASES.some(phrase => transcriptLower.includes(phrase));
+                            console.log(`🔍 Check suggestion conditions: confidence=${confidence.toFixed(2)} (min: ${MIN_CONFIDENCE}), bufferLen=${transcriptBuffer.length} (min: ${MIN_BUFFER_LENGTH}), timeSince=${timeSinceLastSuggestion}ms (min: ${SUGGESTION_DEBOUNCE_MS}ms), isCriticalObjection=${isCriticalObjection}`);
+                            const normalConditionsMet = confidence >= MIN_CONFIDENCE &&
+                                transcriptBuffer.length >= MIN_BUFFER_LENGTH &&
+                                timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS;
+                            const criticalObjectionConditionsMet = confidence >= MIN_CONFIDENCE &&
+                                isCriticalObjection &&
+                                timeSinceLastSuggestion > SUGGESTION_DEBOUNCE_MS;
+                            if (normalConditionsMet || criticalObjectionConditionsMet) {
+                                if (criticalObjectionConditionsMet && !normalConditionsMet) {
+                                    console.log('🚨 CRITICAL OBJECTION DETECTED - Processing short phrase immediately!');
+                                }
+                                else {
+                                    console.log('✅ Conditions met for HIGH-QUALITY suggestion, generating...');
+                                }
                                 if (session.userId !== 'demo-user') {
                                     const userStats = userSuggestions.get(session.userId);
                                     const currentTime = Date.now();
@@ -459,7 +480,16 @@ wss.on('connection', async (ws) => {
                                     console.log(`📊 Suggestion ${stats.count}/${MAX_SUGGESTIONS_PER_5MIN} for user ${session.userId}`);
                                 }
                                 lastSuggestionTime = now;
-                                await (0, gpt_handler_1.handleGPTSuggestion)(transcriptBuffer, ws, async (category, suggestion) => {
+                                console.log('\n' + '='.repeat(80));
+                                console.log('🤖 CHIAMATA GPT - INIZIO');
+                                console.log('='.repeat(80));
+                                console.log(`📝 Transcript completo (${transcriptBuffer.length} caratteri):`);
+                                console.log(`   "${transcriptBuffer}"`);
+                                console.log(`📊 Confidence: ${confidence.toFixed(2)}`);
+                                console.log(`🌍 Lingua rilevata da Deepgram: ${detectedLanguage}`);
+                                console.log(`   ⚠️  GPT verificherà questa lingua analizzando il testo`);
+                                console.log('='.repeat(80) + '\n');
+                                await (0, gpt_handler_1.handleGPTSuggestion)(transcriptBuffer, ws, detectedLanguage, async (category, suggestion) => {
                                     if (session.userId !== 'demo-user') {
                                         await saveSuggestion(session, category, suggestion, transcriptBuffer.slice(-500), confidence);
                                     }
@@ -470,13 +500,13 @@ wss.on('connection', async (ws) => {
                             }
                             else {
                                 const reasons = [];
-                                if (confidence < 0.65)
-                                    reasons.push(`confidence too low (${confidence.toFixed(2)} < 0.65)`);
-                                if (transcriptBuffer.length <= 80)
-                                    reasons.push(`buffer too short (${transcriptBuffer.length} <= 80)`);
+                                if (confidence < MIN_CONFIDENCE)
+                                    reasons.push(`confidence too low (${confidence.toFixed(2)} < ${MIN_CONFIDENCE})`);
+                                if (transcriptBuffer.length < MIN_BUFFER_LENGTH)
+                                    reasons.push(`buffer too short (${transcriptBuffer.length} < ${MIN_BUFFER_LENGTH} chars)`);
                                 if (timeSinceLastSuggestion <= SUGGESTION_DEBOUNCE_MS)
-                                    reasons.push(`debounce not elapsed (${timeSinceLastSuggestion}ms <= ${SUGGESTION_DEBOUNCE_MS}ms)`);
-                                console.log(`⏸️ Suggestion skipped: ${reasons.join(', ')}`);
+                                    reasons.push(`cooldown active (${Math.round(timeSinceLastSuggestion / 1000)}s / ${Math.round(SUGGESTION_DEBOUNCE_MS / 1000)}s)`);
+                                console.log(`⏸️ Suggestion skipped (waiting for quality): ${reasons.join(', ')}`);
                             }
                         }
                     }
@@ -513,21 +543,25 @@ wss.on('connection', async (ws) => {
                     console.log('📊 Deepgram metadata:', JSON.stringify(metadata, null, 2));
                 });
             }
+            audioPacketsReceived++;
             if (deepgramConnection) {
                 const readyState = deepgramConnection.getReadyState();
                 console.log(`🔍 Deepgram state - Ready: ${deepgramReady}, ReadyState: ${readyState}`);
                 if (deepgramReady && readyState === 1) {
                     deepgramConnection.send(message);
                     audioPacketsSent++;
-                    console.log(`✅ Sending audio packet directly to Deepgram (${message.length} bytes) - Total sent: ${audioPacketsSent}`);
+                    console.log(`✅ Sending audio packet directly to Deepgram (${message.length} bytes)`);
+                    console.log(`📊 Audio Stats - Ricevuti: ${audioPacketsReceived}, Inviati: ${audioPacketsSent}, In Buffer: ${audioBuffer.length}`);
                 }
                 else {
                     audioBuffer.push(message);
                     console.log(`📦 Buffering audio packet... (${audioBuffer.length} in queue, ready: ${deepgramReady}, state: ${readyState})`);
+                    console.log(`📊 Audio Stats - Ricevuti: ${audioPacketsReceived}, Inviati: ${audioPacketsSent}, In Buffer: ${audioBuffer.length}`);
                 }
             }
             else {
                 console.log('⚠️ No Deepgram connection available to send audio');
+                console.log(`📊 Audio Stats - Ricevuti: ${audioPacketsReceived}, Inviati: 0 (no connection)`);
             }
         }
         catch (error) {
