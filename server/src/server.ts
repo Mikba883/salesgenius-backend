@@ -653,8 +653,8 @@ wss.on('connection', async (ws: WebSocket) => {
             model: 'nova-2',           // ⚡ Modello standard Deepgram (compatibile con il piano corrente)
             diarize: true,             // ⚡ SMART CONTEXT: Abilita speaker diarization (Speaker 0/1)
             interim_results: true,
-            utterance_end_ms: 3000,    // ⚡ Aumentato a 3s per catturare frasi complete del cliente
-            endpointing: 600,          // ⚡ 600ms di silenzio prima di finalizzare (migliora rilevamento fine frase)
+            utterance_end_ms: 1500,    // ⚡ RIDOTTO da 3s a 1.5s - invia [FINAL] più frequentemente durante conversazione attiva
+            endpointing: 400,          // ⚡ RIDOTTO da 600ms a 400ms - rileva fine frase più velocemente
             vad_events: true,
           });
 
