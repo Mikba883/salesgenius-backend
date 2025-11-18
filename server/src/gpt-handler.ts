@@ -146,30 +146,34 @@ export async function handleGPTSuggestion(
 
     if (isValueQuestion) {
       console.log('🔍 VALUE question detected - fetching real market data from Tavily...');
-      console.log(`🔑 Tavily API Key present: ${process.env.TAVILY_API_KEY ? 'YES' : 'NO'}`);
+      console.log(`🔑 Tavily API Key present: ${process.env.TAVILY_API_KEY ? 'YES' : 'NO ⚠️'}`);
 
-      try {
-        // Costruisci query di ricerca intelligente basata sul transcript
-        const searchQuery = `B2B sales ROI statistics industry benchmarks ${transcript.substring(0, 100)}`;
+      if (!process.env.TAVILY_API_KEY) {
+        console.error('❌ TAVILY_API_KEY not configured! Skipping web search.');
+        marketDataContext = '';
+      } else {
+        try {
+          // Costruisci query di ricerca intelligente basata sul transcript
+          const searchQuery = `B2B sales ROI statistics industry benchmarks ${transcript.substring(0, 100)}`;
 
-        console.log(`📡 Tavily search query: "${searchQuery}"`);
-        console.log(`⏱️  Starting Tavily API call with 5s timeout...`);
+          console.log(`📡 Tavily search query: "${searchQuery}"`);
+          console.log(`⏱️  Starting Tavily API call with 5s timeout...`);
 
-        // Chiamata Tavily API con timeout
-        const searchPromise = tavilyClient.search(searchQuery, {
-          searchDepth: 'basic',
-          maxResults: 3,
-          includeAnswer: true,
-        });
+          // Chiamata Tavily API con timeout
+          const searchPromise = tavilyClient.search(searchQuery, {
+            searchDepth: 'basic',
+            maxResults: 3,
+            includeAnswer: true,
+          });
 
-        const searchTimeout = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Tavily search timeout')), 5000)
-        );
+          const searchTimeout = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Tavily search timeout')), 5000)
+          );
 
-        const response = await Promise.race([searchPromise, searchTimeout]);
+          const response = await Promise.race([searchPromise, searchTimeout]);
 
-        console.log(`✅ Tavily API call completed successfully`);
-        console.log(`✅ Tavily returned ${response.results?.length || 0} results`);
+          console.log(`✅ Tavily API call completed successfully`);
+          console.log(`✅ Tavily returned ${response.results?.length || 0} results`);
 
         // Estrai dati rilevanti dai risultati
         if (response.results && response.results.length > 0) {
@@ -202,13 +206,15 @@ Remind seller to look up specific statistics relevant to customer's industry.
 `;
           console.log('⚠️ Tavily returned no results, using generic guidance');
         }
-      } catch (error: any) {
-        console.error(`❌ Tavily search FAILED!`);
-        console.error(`   Error type: ${error.constructor.name}`);
-        console.error(`   Error message: ${error.message}`);
-        console.error(`   Full error:`, error);
-        console.log(`⚠️ Proceeding without market data`);
-        marketDataContext = '';
+        } catch (error: any) {
+          console.error(`❌ Tavily search FAILED!`);
+          console.error(`   Error type: ${error.constructor?.name || 'Unknown'}`);
+          console.error(`   Error message: ${error.message}`);
+          console.error(`   Stack trace:`, error.stack);
+          console.error(`   Full error object:`, JSON.stringify(error, null, 2));
+          console.log(`⚠️ Proceeding without market data`);
+          marketDataContext = '';
+        }
       }
     } else {
       console.log(`ℹ️  No VALUE keywords detected, skipping Tavily search`);

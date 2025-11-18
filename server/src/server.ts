@@ -80,7 +80,7 @@ const MAX_CONNECTIONS_PER_USER = 2;
 
 // Tracking suggerimenti per rate limiting
 const userSuggestions = new Map<string, { count: number; resetTime: number }>(); // userId -> {count, resetTime}
-const MAX_SUGGESTIONS_PER_5MIN = 10;
+const MAX_SUGGESTIONS_PER_5MIN = 10; // ⚡ Configurazione originale che funzionava (max ~5 suggerimenti in 3 min)
 
 // ==========================================
 // HEALTH CHECK ENDPOINTS (FIX PER RENDER)
@@ -278,6 +278,10 @@ async function saveSuggestion(
   }
 ): Promise<void> {
   try {
+    console.log(`📤 Attempting to save sales_event to Supabase: [${data.category}/${data.intent}]`);
+    console.log(`   User: ${session.userId}, Meeting: ${data.meetingId || session.sessionId}`);
+    console.log(`   SUPABASE_SERVICE_KEY present: ${process.env.SUPABASE_SERVICE_KEY ? 'YES' : 'NO ⚠️'}`);
+
     const { error } = await supabaseAdmin
       .from('sales_events')
       .insert({
@@ -317,12 +321,21 @@ async function saveSuggestion(
       });
 
     if (error) {
-      console.error('❌ Error saving sales_event:', error);
+      console.error('❌ Supabase save FAILED!');
+      console.error('   Error code:', error.code);
+      console.error('   Error message:', error.message);
+      console.error('   Error details:', error.details);
+      console.error('   Full error:', JSON.stringify(error, null, 2));
     } else {
-      console.log(`💾 Sales event saved: [${data.category}/${data.intent}] tokens=${data.tokensUsed}, latency=${data.latencyMs}ms`);
+      console.log(`✅ Sales event saved successfully to Supabase`);
+      console.log(`   Category/Intent: [${data.category}/${data.intent}]`);
+      console.log(`   Metrics: tokens=${data.tokensUsed}, latency=${data.latencyMs}ms`);
     }
-  } catch (error) {
-    console.error('❌ Unexpected error saving sales_event:', error);
+  } catch (error: any) {
+    console.error('❌ Unexpected exception saving sales_event!');
+    console.error('   Error type:', error?.constructor?.name);
+    console.error('   Error message:', error?.message);
+    console.error('   Stack trace:', error?.stack);
   }
 }
 
@@ -338,7 +351,7 @@ wss.on('connection', async (ws: WebSocket) => {
   let transcriptBuffer = '';
   let lastSuggestionTime = 0;
   let lastTranscriptTime = Date.now(); // ⚡ DEAD AIR: Timestamp ultimo transcript ricevuto
-  const SUGGESTION_DEBOUNCE_MS = 10000; // ⚡ 10 secondi - reagisce rapidamente ai momenti chiave
+  const SUGGESTION_DEBOUNCE_MS = 10000; // ⚡ 10 secondi - configurazione originale che funzionava
   const MIN_CONFIDENCE = 0.75; // ⚡ Minima confidence per suggerimenti (0.75 = alta qualità trascrizione)
   const MIN_BUFFER_LENGTH = 25; // ⚡ 25 caratteri - cattura obiezioni brevi come "Costa troppo" o "Non mi interessa"
   const DEAD_AIR_THRESHOLD_MS = 5000; // ⚡ DEAD AIR: 5 secondi di silenzio assoluto
