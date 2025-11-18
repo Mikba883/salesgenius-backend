@@ -111,8 +111,9 @@ export default function SalesGeniusStream() {
         );
       }
 
-      // 3) Setup AudioContext a 16kHz + AudioWorklet per PCM16
-      const ctx = new AudioContext({ sampleRate: 16000 });
+      // 3) Setup AudioContext con sample rate nativo del sistema (44.1/48kHz) per qualità ottimale
+      // Deepgram gestirà il downsampling lato server se necessario
+      const ctx = new AudioContext(); // Usa default del sistema (44.1kHz o 48kHz)
       ctxRef.current = ctx;
 
       // Worklet inline per conversione PCM16 con supporto stereo
@@ -198,12 +199,20 @@ export default function SalesGeniusStream() {
       if (audioTrack) {
         const displaySource = ctx.createMediaStreamSource(dispStream);
         const displayGain = ctx.createGain();
-        displayGain.gain.value = 1.2; // Volume audio condivisione leggermente aumentato
+        displayGain.gain.value = 1.0; // Volume normale per playback diretto
         displaySource.connect(displayGain);
+
+        // ⚡ CONNESSIONE DIRETTA AGLI SPEAKERS (elimina distorsione)
+        // L'utente sente l'audio del tab in alta qualità
+        displayGain.connect(ctx.destination);
+
+        // ⚡ CONNESSIONE AL MIXER per invio a Deepgram
         displayGain.connect(mixer);
+
         console.log('🔊 Audio condivisione schermo connesso');
         console.log(`   - Canali: ${displaySource.channelCount}`);
-        console.log(`   - Sample rate: ${ctx.sampleRate}Hz`);
+        console.log(`   - Sample rate nativo: ${ctx.sampleRate}Hz (alta qualità)`);
+        console.log(`   - ✅ Output diretto agli speakers abilitato`);
       }
 
       // Connetti audio dal microfono (se presente)
