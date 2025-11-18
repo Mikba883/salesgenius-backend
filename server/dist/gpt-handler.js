@@ -177,7 +177,9 @@ Remind seller to look up specific statistics relevant to customer's industry.
         }
         const suggestion = parsedResponse.suggestion || '';
         const language = parsedResponse.language || 'en';
-        console.log(`✅ Validated: category="${category}", intent="${intent}", language="${language}"`);
+        const tokensUsed = completion.usage?.total_tokens || 0;
+        const modelUsed = qualitySettings.model;
+        console.log(`✅ Validated: category="${category}", intent="${intent}", language="${language}", tokens=${tokensUsed}`);
         recentCategories.push(category);
         if (recentCategories.length > MAX_CATEGORY_HISTORY) {
             recentCategories.shift();
@@ -249,9 +251,19 @@ Remind seller to look up specific statistics relevant to customer's industry.
         console.log(`   ℹ️  If Deepgram detected different language, GPT correction is applied`);
         console.log(`✅ Suggestion: "${suggestion}"`);
         console.log(`📊 Recent categories (variety check): [${recentCategories.join(', ')}]`);
+        console.log(`🔢 Tokens used: ${tokensUsed}`);
         console.log('='.repeat(80) + '\n');
-        if (onSuggestionGenerated)
-            await onSuggestionGenerated(category, suggestion);
+        if (onSuggestionGenerated) {
+            await onSuggestionGenerated(category, suggestion, intent, language, tokensUsed);
+        }
+        return {
+            category,
+            intent,
+            suggestion,
+            language,
+            tokensUsed,
+            model: modelUsed
+        };
     }
     catch (error) {
         if (error.message === 'OpenAI request timeout') {

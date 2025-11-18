@@ -180,33 +180,43 @@ async function authenticateUser(authToken) {
         return null;
     }
 }
-async function saveSuggestion(session, category, suggestion, transcriptContext, confidence) {
+async function saveSuggestion(session, data) {
     try {
         const { error } = await supabaseAdmin
             .from('sales_events')
             .insert({
             id: crypto.randomUUID(),
+            organization_id: data.organizationId || null,
             user_id: session.userId,
-            session_id: session.sessionId,
-            category,
-            suggestion,
-            transcript_context: transcriptContext,
-            confidence,
+            meeting_id: data.meetingId || session.sessionId,
+            transcript: data.transcript,
+            confidence: data.confidence,
+            language: data.language,
+            intent: data.intent,
+            category: data.category,
+            suggestion: data.suggestion,
+            latency_ms: data.latencyMs,
+            tokens_used: data.tokensUsed,
+            model: data.model,
+            confidence_threshold: data.confidenceThreshold,
             created_at: new Date().toISOString(),
             metadata: {
-                model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-                processing_time_ms: Date.now() - session.startTime.getTime()
+                model: data.model,
+                total_latency_ms: data.latencyMs,
+                tokens_used: data.tokensUsed,
+                confidence_threshold: data.confidenceThreshold,
+                session_duration_ms: Date.now() - session.startTime.getTime()
             }
         });
         if (error) {
-            console.error('Error saving suggestion:', error);
+            console.error('❌ Error saving sales_event:', error);
         }
         else {
-            console.log(`💾 Suggestion saved: [${category}] ${suggestion.substring(0, 50)}...`);
+            console.log(`💾 Sales event saved: [${data.category}/${data.intent}] tokens=${data.tokensUsed}, latency=${data.latencyMs}ms`);
         }
     }
     catch (error) {
-        console.error('Unexpected error saving suggestion:', error);
+        console.error('❌ Unexpected error saving sales_event:', error);
     }
 }
 wss.on('connection', async (ws) => {
@@ -245,9 +255,22 @@ wss.on('connection', async (ws) => {
             if (session) {
                 try {
                     const reEngagementPrompt = `The conversation has gone silent for 5+ seconds after this: "${transcriptBuffer.slice(-200)}". Suggest a polite, open-ended question to re-engage the prospect and continue the discussion naturally.`;
-                    await (0, gpt_handler_1.handleGPTSuggestion)(reEngagementPrompt, ws, 'en', async (category, suggestion) => {
+                    const deadAirStart = Date.now();
+                    const result = await (0, gpt_handler_1.handleGPTSuggestion)(reEngagementPrompt, ws, 'en', async (category, suggestion, intent, language, tokensUsed) => {
                         if (session.userId !== 'demo-user') {
-                            await saveSuggestion(session, 'rapport', suggestion, transcriptBuffer.slice(-500), 0.9);
+                            const deadAirLatency = Date.now() - deadAirStart;
+                            saveSuggestion(session, {
+                                category,
+                                intent,
+                                suggestion,
+                                transcript: transcriptBuffer.slice(-500),
+                                confidence: 0.9,
+                                language,
+                                tokensUsed,
+                                model: 'gpt-4o-mini',
+                                latencyMs: deadAirLatency,
+                                confidenceThreshold: MIN_CONFIDENCE
+                            }).catch(err => console.error('Error logging dead air event:', err));
                         }
                     });
                     lastSuggestionTime = Date.now();
@@ -518,9 +541,22 @@ wss.on('connection', async (ws) => {
                                             const timeSinceLastSuggestion = Date.now() - lastSuggestionTime;
                                             if (timeSinceLastSuggestion > 3000) {
                                                 lastSuggestionTime = Date.now();
-                                                await (0, gpt_handler_1.handleGPTSuggestion)(transcript, ws, detectedLanguage, async (category, suggestion) => {
+                                                const smartContextStart = Date.now();
+                                                const result = await (0, gpt_handler_1.handleGPTSuggestion)(transcript, ws, detectedLanguage, async (category, suggestion, intent, language, tokensUsed) => {
                                                     if (session.userId !== 'demo-user') {
-                                                        await saveSuggestion(session, category, suggestion, transcript, confidence);
+                                                        const smartContextLatency = Date.now() - smartContextStart;
+                                                        saveSuggestion(session, {
+                                                            category,
+                                                            intent,
+                                                            suggestion,
+                                                            transcript,
+                                                            confidence,
+                                                            language,
+                                                            tokensUsed,
+                                                            model: 'gpt-4o-mini',
+                                                            latencyMs: smartContextLatency,
+                                                            confidenceThreshold: MIN_CONFIDENCE
+                                                        }).catch(err => console.error('Error logging smart context event:', err));
                                                     }
                                                 });
                                                 return;
@@ -586,9 +622,22 @@ wss.on('connection', async (ws) => {
                                 console.log(`🌍 Lingua rilevata da Deepgram: ${detectedLanguage}`);
                                 console.log(`   ⚠️  GPT verificherà questa lingua analizzando il testo`);
                                 console.log('='.repeat(80) + '\n');
-                                await (0, gpt_handler_1.handleGPTSuggestion)(transcriptBuffer, ws, detectedLanguage, async (category, suggestion) => {
+                                const suggestionStartTime = Date.now();
+                                const result = await (0, gpt_handler_1.handleGPTSuggestion)(transcriptBuffer, ws, detectedLanguage, async (category, suggestion, intent, language, tokensUsed) => {
                                     if (session.userId !== 'demo-user') {
-                                        await saveSuggestion(session, category, suggestion, transcriptBuffer.slice(-500), confidence);
+                                        const totalLatency = Date.now() - suggestionStartTime;
+                                        saveSuggestion(session, {
+                                            category,
+                                            intent,
+                                            suggestion,
+                                            transcript: transcriptBuffer.slice(-500),
+                                            confidence,
+                                            language,
+                                            tokensUsed,
+                                            model: result?.model || 'gpt-4o-mini',
+                                            latencyMs: totalLatency,
+                                            confidenceThreshold: MIN_CONFIDENCE
+                                        }).catch(err => console.error('Error logging suggestion event:', err));
                                     }
                                 });
                                 if (transcriptBuffer.length > 1000) {

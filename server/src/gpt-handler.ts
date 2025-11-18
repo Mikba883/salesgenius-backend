@@ -117,12 +117,23 @@ function detectIfValueQuestion(transcript: string): boolean {
 // ============================================================================
 // 🧠 handleGPTSuggestion()
 // ============================================================================
+
+// Return type per tracking metadati completi
+export interface SuggestionResult {
+  category: string;
+  intent: string;
+  suggestion: string;
+  language: string;
+  tokensUsed: number;
+  model: string;
+}
+
 export async function handleGPTSuggestion(
   transcript: string,
   ws: WebSocket,
   detectedLanguage?: string,
-  onSuggestionGenerated?: (category: string, suggestion: string) => Promise<void>
-): Promise<void> {
+  onSuggestionGenerated?: (category: string, suggestion: string, intent: string, language: string, tokensUsed: number) => Promise<void>
+): Promise<SuggestionResult | void> {
   console.log(`💬 Generating suggestion for transcript: "${transcript.substring(0, 100)}..."`);
   console.log(`🌍 Deepgram detected language: ${detectedLanguage || 'unknown'}`);
 
@@ -279,7 +290,11 @@ Remind seller to look up specific statistics relevant to customer's industry.
     const suggestion = parsedResponse.suggestion || '';
     const language = parsedResponse.language || 'en';
 
-    console.log(`✅ Validated: category="${category}", intent="${intent}", language="${language}"`);
+    // ⚡ TRACK TOKENS USED (per monitoraggio costi e re-training)
+    const tokensUsed = completion.usage?.total_tokens || 0;
+    const modelUsed = qualitySettings.model;
+
+    console.log(`✅ Validated: category="${category}", intent="${intent}", language="${language}", tokens=${tokensUsed}`);
 
     // ⚡ Track categories for variety detection
     recentCategories.push(category);
@@ -375,9 +390,24 @@ Remind seller to look up specific statistics relevant to customer's industry.
     console.log(`   ℹ️  If Deepgram detected different language, GPT correction is applied`);
     console.log(`✅ Suggestion: "${suggestion}"`);
     console.log(`📊 Recent categories (variety check): [${recentCategories.join(', ')}]`);
+    console.log(`🔢 Tokens used: ${tokensUsed}`);
     console.log('='.repeat(80) + '\n');
 
-    if (onSuggestionGenerated) await onSuggestionGenerated(category, suggestion);
+    // ⚡ Callback per salvare il suggerimento (con nuovi parametri)
+    if (onSuggestionGenerated) {
+      await onSuggestionGenerated(category, suggestion, intent, language, tokensUsed);
+    }
+
+    // ⚡ Return SuggestionResult per tracking metadati completi
+    return {
+      category,
+      intent,
+      suggestion,
+      language,
+      tokensUsed,
+      model: modelUsed
+    };
+
   } catch (error: any) {
     if (error.message === 'OpenAI request timeout') {
       console.error('⏱️ OpenAI API timeout after 8 seconds');
