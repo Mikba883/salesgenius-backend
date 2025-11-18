@@ -632,7 +632,7 @@ wss.on('connection', async (ws: WebSocket) => {
         try {
           deepgramConnection = deepgramClient.listen.live({
             encoding: 'linear16',      // PCM16 format
-            sample_rate: 16000,        // 16kHz sample rate (compatibile e performante)
+            sample_rate: 48000,        // ⚡ 48kHz high-quality (frontend buffering ottimizzato)
             channels: 1,               // Mono audio
             language: 'multi',         // ⚡ Multi-language detection (auto-detect: en, it, es, fr, de, etc.)
             punctuate: true,
@@ -675,13 +675,19 @@ wss.on('connection', async (ws: WebSocket) => {
         });
 
         deepgramConnection.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
-          console.log('🎤 Deepgram Transcript event received:', JSON.stringify(data, null, 2));
           const transcript = data.channel?.alternatives[0]?.transcript;
           const isFinal = data.is_final;
           const confidence = data.channel?.alternatives[0]?.confidence || 0;
           const detectedLanguage = data.channel?.alternatives[0]?.language || data.channel?.detected_language || 'unknown';
 
-          console.log(`🔍 Transcript details - Text: "${transcript}", isFinal: ${isFinal}, confidence: ${confidence}, language: ${detectedLanguage}`);
+          // ⚡ FIX: Filtra transcript vuoti (keep-alive di Deepgram) per ridurre log spam
+          if (!transcript || transcript.trim().length === 0) {
+            // Skip silently - no log spam
+            return;
+          }
+
+          // Log solo transcript reali
+          console.log(`🎤 [${isFinal ? 'FINAL' : 'INTERIM'}] "${transcript}" (conf: ${confidence.toFixed(2)}, lang: ${detectedLanguage})`);
 
           if (transcript && transcript.length > 0) {
             console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);

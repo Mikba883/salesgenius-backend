@@ -451,7 +451,7 @@ wss.on('connection', async (ws) => {
                 try {
                     deepgramConnection = deepgramClient.listen.live({
                         encoding: 'linear16',
-                        sample_rate: 16000,
+                        sample_rate: 48000,
                         channels: 1,
                         language: 'multi',
                         punctuate: true,
@@ -489,12 +489,14 @@ wss.on('connection', async (ws) => {
                     }
                 });
                 deepgramConnection.on(sdk_1.LiveTranscriptionEvents.Transcript, async (data) => {
-                    console.log('🎤 Deepgram Transcript event received:', JSON.stringify(data, null, 2));
                     const transcript = data.channel?.alternatives[0]?.transcript;
                     const isFinal = data.is_final;
                     const confidence = data.channel?.alternatives[0]?.confidence || 0;
                     const detectedLanguage = data.channel?.alternatives[0]?.language || data.channel?.detected_language || 'unknown';
-                    console.log(`🔍 Transcript details - Text: "${transcript}", isFinal: ${isFinal}, confidence: ${confidence}, language: ${detectedLanguage}`);
+                    if (!transcript || transcript.trim().length === 0) {
+                        return;
+                    }
+                    console.log(`🎤 [${isFinal ? 'FINAL' : 'INTERIM'}] "${transcript}" (conf: ${confidence.toFixed(2)}, lang: ${detectedLanguage})`);
                     if (transcript && transcript.length > 0) {
                         console.log(`📝 [${isFinal ? 'FINAL' : 'INTERIM'}] ${transcript} (confidence: ${confidence})`);
                         if (isFinal) {
