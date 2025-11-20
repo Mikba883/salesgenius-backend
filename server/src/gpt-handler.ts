@@ -79,8 +79,29 @@ const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }
 const MAX_HISTORY = 10;  // Aumentato da 5 a 10 per più contesto
 const recentCategories: string[] = []; // ⚡ Track last categories to detect variety issues
 const MAX_CATEGORY_HISTORY = 5;
+const MAX_CONSECUTIVE_SAME_CATEGORY = 3; // ⚡ NEW: Max consecutive same category before forcing rotation
 const recentSuggestionTexts: string[] = []; // ⚡ Track last 10 suggestions to prevent repeats
 const MAX_RECENT_SUGGESTIONS = 10; // Aumentato da 3 a 10
+
+// ============================================================================
+// 🔄 shouldForceRotation() - Check if we need to force a different category
+// ============================================================================
+function shouldForceRotation(): { shouldRotate: boolean; excludeCategory: SuggestionCategory | null } {
+  // Check if last 3 categories are the same
+  if (recentCategories.length < MAX_CONSECUTIVE_SAME_CATEGORY) {
+    return { shouldRotate: false, excludeCategory: null };
+  }
+
+  const lastThree = recentCategories.slice(-MAX_CONSECUTIVE_SAME_CATEGORY);
+  const allSame = lastThree.every(cat => cat === lastThree[0]);
+
+  if (allSame) {
+    console.log(`🔄 ROTATION FORCED: Last ${MAX_CONSECUTIVE_SAME_CATEGORY} suggestions were all "${lastThree[0]}" - forcing different category`);
+    return { shouldRotate: true, excludeCategory: lastThree[0] as SuggestionCategory };
+  }
+
+  return { shouldRotate: false, excludeCategory: null };
+}
 
 // ============================================================================
 // 🔍 detectIfValueQuestion() - Check if transcript is asking about VALUE
@@ -220,6 +241,13 @@ Remind seller to look up specific statistics relevant to customer's industry.
       console.log(`ℹ️  No VALUE keywords detected, skipping Tavily search`);
     }
 
+    // ⚡ STEP 2: Check if we need to force category rotation
+    const rotationCheck = shouldForceRotation();
+
+    if (rotationCheck.shouldRotate) {
+      console.log(`🔄 Category rotation will be enforced - excluding: "${rotationCheck.excludeCategory}"`);
+    }
+
     const messages = buildMessages({
       transcript,
       confidence: 0.8,
@@ -228,6 +256,8 @@ Remind seller to look up specific statistics relevant to customer's industry.
       recentCategories: recentCategories,  // ⚡ Pass recent categories for variety tracking
       marketDataContext,  // ⚡ Pass market data context if available
       recentSuggestions: recentSuggestionTexts,  // ⚡ Pass last 3 suggestions to prevent repeats
+      forceRotation: rotationCheck.shouldRotate,  // ⚡ NEW: Tell GPT to avoid repeating category
+      excludeCategory: rotationCheck.excludeCategory,  // ⚡ NEW: Which category to exclude
     });
 
     const qualityMode = process.env.QUALITY_MODE || 'balanced';
@@ -269,7 +299,7 @@ Remind seller to look up specific statistics relevant to customer's industry.
       throw new Error('Invalid response format from GPT');
     }
 
-    // ⚡ VALIDAZIONE ROBUSTA DELLE CATEGORIE
+    // ⚡ VALIDAZIONE ROBUSTA DELLE CATEGORIE + FORCED ROTATION
     const VALID_CATEGORIES: SuggestionCategory[] = ['rapport', 'discovery', 'value', 'objection', 'closing'];
     const VALID_INTENTS: SuggestionIntent[] = ['explore', 'express_need', 'show_interest', 'raise_objection', 'decide'];
 
@@ -281,6 +311,28 @@ Remind seller to look up specific statistics relevant to customer's industry.
     } else {
       console.warn(`⚠️ Invalid category "${parsedResponse.category}" received from GPT. Defaulting to 'discovery'. Valid categories: ${VALID_CATEGORIES.join(', ')}`);
       category = 'discovery';
+    }
+
+    // ⚡ FORCE ROTATION: If GPT still returned excluded category, pick a different one
+    if (rotationCheck.shouldRotate && category === rotationCheck.excludeCategory) {
+      const alternativeCategories = VALID_CATEGORIES.filter(cat => cat !== rotationCheck.excludeCategory);
+      // Pick intelligently based on transcript
+      const lowerTranscript = transcript.toLowerCase();
+
+      if (lowerTranscript.includes('?') && (lowerTranscript.includes('how') || lowerTranscript.includes('what') || lowerTranscript.includes('why') || lowerTranscript.includes('come') || lowerTranscript.includes('cosa') || lowerTranscript.includes('perché'))) {
+        category = 'discovery'; // Questions = discovery
+      } else if (lowerTranscript.includes('cost') || lowerTranscript.includes('price') || lowerTranscript.includes('expensive') || lowerTranscript.includes('troppo') || lowerTranscript.includes('costo')) {
+        category = 'objection'; // Price concerns = objection
+      } else if (lowerTranscript.includes('roi') || lowerTranscript.includes('benefit') || lowerTranscript.includes('vantaggi') || lowerTranscript.includes('risultati')) {
+        category = 'value'; // ROI questions = value
+      } else if (lowerTranscript.includes('next') || lowerTranscript.includes('start') || lowerTranscript.includes('begin') || lowerTranscript.includes('prossimo') || lowerTranscript.includes('iniziare')) {
+        category = 'closing'; // Next steps = closing
+      } else {
+        // Fallback: pick first alternative that's not excluded
+        category = alternativeCategories[0];
+      }
+
+      console.log(`🔄 FORCED ROTATION: GPT returned "${rotationCheck.excludeCategory}" but rotation required. Changed to "${category}"`);
     }
 
     let rawIntent = parsedResponse.intent?.toLowerCase() || '';
