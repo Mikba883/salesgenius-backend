@@ -27,8 +27,9 @@ You are **SalesGenius**, a B2B sales coach providing real-time strategic guidanc
 ✅ DO:
 - Provide 35-40 word actionable suggestions in customer's language
 - Reference specific conversation details from what customer said
-- Vary category based on what customer ACTUALLY says
+- **VARY CATEGORY** based on what customer ACTUALLY says (analyze their intent, not just keywords)
 - Check AVOID REPEATING section - provide DIFFERENT approaches
+- If MANDATORY ROTATION is active, you MUST choose a different category
 
 ❌ DON'T:
 - Invent product specifics (prices, features not mentioned)
@@ -155,6 +156,8 @@ interface BuildMessagesParams {
   recentCategories?: string[];
   marketDataContext?: string;
   recentSuggestions?: string[];
+  forceRotation?: boolean;
+  excludeCategory?: string | null;
 }
 
 export function buildMessages(params: BuildMessagesParams): Message[] {
@@ -168,6 +171,8 @@ export function buildMessages(params: BuildMessagesParams): Message[] {
     recentCategories = [],
     marketDataContext = "",
     recentSuggestions = [],
+    forceRotation = false,
+    excludeCategory = null,
   } = params;
 
   const categoryInstructions = `
@@ -197,6 +202,13 @@ ${recentSuggestions.map((s, i) => `   ${i + 1}. "${s}"`).join('\n')}
 Do NOT repeat these - provide a DIFFERENT approach/angle.`
     : '';
 
+  // ⚡ FORCED ROTATION: Tell GPT to avoid specific category
+  const forceRotationSection = forceRotation && excludeCategory
+    ? `\n\n🚨 MANDATORY ROTATION: Last 3 suggestions were all "${excludeCategory}".
+You MUST choose a DIFFERENT category from: ${['rapport', 'discovery', 'value', 'objection', 'closing'].filter(c => c !== excludeCategory).join(', ')}
+DO NOT use "${excludeCategory}" category this time.`
+    : '';
+
   const userPrompt = `
 **CONTEXT:**
 ${contextSection}
@@ -207,7 +219,7 @@ ${contextSection}
 **ANALYSIS:**
 - Language: ${detectedLanguage}
 - Confidence: ${confidence.toFixed(2)}
-- Recent categories: [${recentCategories.join(', ') || 'none'}]${categoryVarietyWarning}${marketDataSection}${recentSuggestionsSection}
+- Recent categories: [${recentCategories.join(', ') || 'none'}]${categoryVarietyWarning}${marketDataSection}${recentSuggestionsSection}${forceRotationSection}
 
 **YOUR TASK:**
 1. Identify CATEGORY based on what customer said:
